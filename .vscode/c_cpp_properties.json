@@ -1,0 +1,16 @@
+{
+	"configurations": [
+        {
+            "name": "CMake",
+            "compileCommands": "${workspaceFolder}/compile_commands.json",
+            "configurationProvider": "ms-vscode.cmake-tools",
+            "defines": [
+                "STM32G474xx"
+            ],
+            "includePath": [
+                "${workspaceFolder}/**"
+            ]
+        }
+    ],
+    "version": 4
+}

@@ -1,0 +1,12 @@
+BasedOnStyle: Chromium
+AlignAfterOpenBracket: BlockIndent
+AlignOperands: true
+AllowAllArgumentsOnNextLine: false
+BinPackArguments: false
+BinPackParameters: false
+TabWidth: 4
+IndentWidth: 4
+UseTab: Never
+PointerAlignment: Left
+ColumnLimit: 120
+AccessModifierOffset: -4
