@@ -7,7 +7,6 @@ add_library(stm32cubemx INTERFACE)
 enable_language(C ASM)
 
 target_compile_definitions(stm32cubemx INTERFACE 
-	USE_FULL_LL_DRIVER 
 	USE_HAL_DRIVER 
 	STM32G431xx
     $<$<CONFIG:Debug>:DEBUG>
@@ -34,9 +33,6 @@ target_sources(stm32cubemx INTERFACE
     ../../Core/Src/usart.c
     ../../Core/Src/stm32g4xx_it.c
     ../../Core/Src/stm32g4xx_hal_msp.c
-    ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_ll_utils.c
-    ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_ll_exti.c
-    ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_ll_gpio.c
     ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_adc.c
     ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_adc_ex.c
     ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_ll_adc.c
@@ -53,12 +49,12 @@ target_sources(stm32cubemx INTERFACE
     ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_pwr.c
     ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_pwr_ex.c
     ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_cortex.c
-    ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_ll_cordic.c
-    ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_ll_dma.c
+    ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_cordic.c
     ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_fdcan.c
     ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_i2c.c
     ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_i2c_ex.c
-    ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_ll_spi.c
+    ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_spi.c
+    ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_spi_ex.c
     ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_tim.c
     ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_tim_ex.c
     ../../Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal_uart.c

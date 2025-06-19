@@ -21,7 +21,10 @@ project(${CMAKE_PROJECT_NAME})
 message("Build type: " ${CMAKE_BUILD_TYPE})
 
 add_executable(${CMAKE_PROJECT_NAME})
-
+set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES
+    OUTPUT_NAME ${CMAKE_PROJECT_NAME}
+    SUFFIX ".elf"
+)
 add_subdirectory(cmake/stm32cubemx)
 
 target_link_libraries(${CMAKE_PROJECT_NAME}
@@ -53,6 +56,13 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     -DARM_MATH_CM4
     -D__FPU_PRESENT
 )]]
+
+target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
+    -DUSE_HAL_DRIVER
+    -DSTM32_G
+    -DARM_MATH_CM4
+    -D__FPU_PRESENT
+)
 
 add_custom_command(
     POST_BUILD

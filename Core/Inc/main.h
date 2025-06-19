@@ -29,18 +29,6 @@ extern "C" {
 /* Includes ------------------------------------------------------------------*/
 #include "stm32g4xx_hal.h"
 
-#include "stm32g4xx_ll_cordic.h"
-#include "stm32g4xx_ll_spi.h"
-#include "stm32g4xx_ll_system.h"
-#include "stm32g4xx_ll_gpio.h"
-#include "stm32g4xx_ll_exti.h"
-#include "stm32g4xx_ll_bus.h"
-#include "stm32g4xx_ll_cortex.h"
-#include "stm32g4xx_ll_rcc.h"
-#include "stm32g4xx_ll_utils.h"
-#include "stm32g4xx_ll_pwr.h"
-#include "stm32g4xx_ll_dma.h"
-
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -65,29 +53,29 @@ extern "C" {
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-
+[[noreturn]] void app();
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define INDUCT_EN_Pin LL_GPIO_PIN_13
+#define INDUCT_EN_Pin GPIO_PIN_13
 #define INDUCT_EN_GPIO_Port GPIOC
-#define SPI1_CS1_Pin LL_GPIO_PIN_1
+#define SPI1_CS1_Pin GPIO_PIN_1
 #define SPI1_CS1_GPIO_Port GPIOF
-#define SPI1_CS0_Pin LL_GPIO_PIN_4
+#define SPI1_CS0_Pin GPIO_PIN_4
 #define SPI1_CS0_GPIO_Port GPIOA
-#define LED1_Pin LL_GPIO_PIN_2
+#define LED1_Pin GPIO_PIN_2
 #define LED1_GPIO_Port GPIOB
-#define DRV_WAKE_Pin LL_GPIO_PIN_7
+#define DRV_WAKE_Pin GPIO_PIN_7
 #define DRV_WAKE_GPIO_Port GPIOE
-#define DRV_READY_Pin LL_GPIO_PIN_14
+#define DRV_READY_Pin GPIO_PIN_14
 #define DRV_READY_GPIO_Port GPIOE
-#define DRV_FAULT_Pin LL_GPIO_PIN_15
+#define DRV_FAULT_Pin GPIO_PIN_15
 #define DRV_FAULT_GPIO_Port GPIOE
-#define LED2_Pin LL_GPIO_PIN_10
+#define LED2_Pin GPIO_PIN_10
 #define LED2_GPIO_Port GPIOB
-#define SPI3_CS_Pin LL_GPIO_PIN_2
+#define SPI3_CS_Pin GPIO_PIN_2
 #define SPI3_CS_GPIO_Port GPIOD
-#define IND_IT_Pin LL_GPIO_PIN_7
+#define IND_IT_Pin GPIO_PIN_7
 #define IND_IT_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
