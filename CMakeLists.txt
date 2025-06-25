@@ -35,6 +35,10 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 )
 
+target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
+    "LINKER:-Map=${CMAKE_PROJECT_NAME}.map"
+)
+
 file(GLOB_RECURSE USER_SOURCES "App/*.cpp")
 file(GLOB_RECURSE LIBCXXCANARD_SOURCES "Drivers/libcxxcanard/cyphal/*.cpp" "Drivers/libcxxcanard/libs/*.c")
 file(GLOB_RECURSE LIBVOLTBRO_SOURCES "Drivers/libvoltbro/*.cpp" "Drivers/libvoltbro/*.c")
@@ -51,11 +55,6 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Drivers/libvoltbro
     Drivers/CMSIS/DSP/Include
 )
-
-#[[target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
-    -DARM_MATH_CM4
-    -D__FPU_PRESENT
-)]]
 
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     -DUSE_HAL_DRIVER

@@ -1,3 +1,4 @@
+#pragma region Includes
 #include "app.h"
 
 #include <memory>
@@ -21,13 +22,12 @@
 #include <uavcan/si/unit/voltage/Scalar_1_0.h>
 
 #include <voltbro/eeprom/eeprom.hpp>
-#include <voltbro/encoders/ASxxxx/AS5048A.hpp>
+#include <voltbro/encoders/ASxxxx/AS5047P.hpp>
+#include <voltbro/motors/bldc/vbdrive/vbdrive.h>
 #include <voltbro/utils.hpp>
-
-//EEPROM eeprom(&hi2c4);  // TODO
+#pragma endregion
 
 void setup_cordic() {
-    /*  // TODO
     CORDIC_ConfigTypeDef cordic_config {
         .Function = CORDIC_FUNCTION_COSINE,
         .Scale = CORDIC_SCALE_0,
@@ -38,37 +38,57 @@ void setup_cordic() {
         .Precision = CORDIC_PRECISION_6CYCLES
     };
     HAL_IMPORTANT(HAL_CORDIC_Configure(&hcordic, &cordic_config));
-    */
 }
 
-/*  // TODO
-AS5048A encoder(
+EEPROM eeprom(&hi2c2);
+
+AS5047P motor_encoder(
     GpioPin(
-        SPI3_NSS_GPIO_Port,
-        SPI3_NSS_Pin
+        SPI1_CS0_GPIO_Port,
+        SPI1_CS0_Pin
     ),
-    &hspi3
+    &hspi1
     // correct is_inverted and elec_offset values will be set by apply_calibration
 );
-std::unique_ptr<FOC> motor;
+VBInverter motor_inverter(
+    &hadc1,
+    &hadc2
+);
 
-std::byte calib_data_raw_memory[sizeof(CalibrationData)];
-CalibrationData* calib_data = reinterpret_cast<CalibrationData*>(calib_data_raw_memory);
+/*
+TODO shaft_encoder(
+    GpioPin(
+        SPI3_CS_GPIO_Port,
+        SPI3_CS_Pin
+    ),
+    &hspi3,
+);
 */
 
+std::unique_ptr<VBDrive> motor;
+CalibrationData calibration_data;
 
+#ifdef DEBUG
+static volatile encoder_data value_enc = 0;
+static volatile float value_A = 0;
+static volatile float value_B = 0;
+static volatile float value_C = 0;
+static volatile float value_V = 0;
+static volatile float value_stator_temp = 0;
+static volatile float value_mcu_temp = 0;
+#endif
 [[noreturn]] void app() {
     setup_cordic();
     start_timers();
     start_cyphal();
 
-    /*  // TODO
     while (!eeprom.is_connected()) {
         eeprom.delay();
     }
     eeprom.delay();
 
-    motor = std::make_unique<FOC>(
+    /*
+    motor = std::make_unique<VBDrive>(
         0.00005f,
         // Main control regulator (velocity and position)
         PIDConfig {},
@@ -94,53 +114,60 @@ CalibrationData* calib_data = reinterpret_cast<CalibrationData*>(calib_data_raw_
             .stall_current = 6.0f,
             .stall_timeout = 3.0f,
             .stall_tolerance = 0.2f,
-            .calibration_voltage = 0.1f,
-            .l_pins = {
-                GpioPin(INLA_GPIO_Port, INLA_Pin),
-                GpioPin(INLB_GPIO_Port, INLB_Pin),
-                GpioPin(INLC_GPIO_Port, INLC_Pin)
-            },
-            .en_pin = GpioPin(DRV_ENABLE_GPIO_Port, DRV_ENABLE_Pin),
+            .calibration_voltage = 0.5f,
+            .en_pin = GpioPin(DRV_WAKE_GPIO_Port, DRV_WAKE_Pin),
             .common = {
-                .ppairs = 15,
+                .ppairs = 14,
                 .gear_ratio = 1
             }
         },
         &htim1,
-        &hadc1,
-        encoder
+        motor_encoder,
+        motor_inverter
     );
-    encoder.start_streaming();
     HAL_Delay(1);
     motor->init();
     motor->start();
 
-    HAL_IMPORTANT(eeprom.read<CalibrationData>(calib_data, 0))
-    if (calib_data->type_id != CalibrationData::TYPE_ID || !calib_data->was_calibrated) {
-        calib_data->type_id = CalibrationData::TYPE_ID;
-        calib_data->was_calibrated = false;
-        calib_data->ppair_counter = 0;
-        calib_data->meas_elec_offset = 0;
-        for (size_t i = 0; i < CALIBRATION_BUFF_SIZE; i++) {
-            calib_data->calibration_array[i] = 0;
-        }
-        motor->calibrate(calib_data);
-
-        calib_data->was_calibrated = true;
-        HAL_IMPORTANT(eeprom.write<CalibrationData>(calib_data, 0))
+    HAL_IMPORTANT(eeprom.read<CalibrationData>(&calibration_data, 0))
+    if (calibration_data.type_id != CalibrationData::TYPE_ID || !calibration_data.was_calibrated) {
+        calibration_data.reset();
+        motor->calibrate(calibration_data);
+        calibration_data.was_calibrated = true;
+        HAL_IMPORTANT(eeprom.write<CalibrationData>(&calibration_data, 0))
     }
-    motor->apply_calibration(calib_data);
-    motor->set_voltage_point(0.0f);
-    */
+    motor->apply_calibration(calibration_data);
+    motor->set_voltage_point(0.0f);*/
 
     set_cyphal_mode(uavcan_node_Mode_1_0_OPERATIONAL);
 
     HAL_TIM_Base_Start_IT(&htim1);
+    #ifdef DEBUG
+    motor_encoder.init();
+
+    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1); // start TIM1 to trigger ADCs
+    motor_inverter.start();
+    #endif
     while(true) {
+        #ifndef DEBUG
         cyphal_loop();
+        #endif
+
+        #ifdef DEBUG
+        motor_encoder.update_value();
+        value_enc = motor_encoder.get_value();
+        motor_inverter.update();
+        value_A = motor_inverter.get_A();
+        value_B = motor_inverter.get_B();
+        value_C = motor_inverter.get_C();
+        value_V = motor_inverter.get_busV();
+        value_stator_temp = motor_inverter.get_stator_temperature();
+        value_mcu_temp = motor_inverter.get_mcu_temperature();
+        #endif
     }
 }
 
+#pragma region Cyphal
 TYPE_ALIAS(Real32, uavcan_primitive_scalar_Real32_1_0)
 TYPE_ALIAS(AngularVelocity, uavcan_si_unit_angular_velocity_Scalar_1_0)
 TYPE_ALIAS(Angle, uavcan_si_unit_angle_Scalar_1_0)
@@ -275,3 +302,4 @@ void setup_subscriptions() {
         torque_sub->make_filter(node_id)
     ))
 }
+#pragma endregion
