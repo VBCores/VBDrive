@@ -8,6 +8,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
     if (htim->Instance == TIM2) {
         HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
     }
+    else if (htim->Instance == TIM1) {
+        get_motor()->update();
+    }
     else if (htim->Instance == TIM6) {
         millis_k += 1;
     }

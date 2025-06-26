@@ -42,30 +42,15 @@ void setup_cordic() {
 
 EEPROM eeprom(&hi2c2);
 
-AS5047P motor_encoder(
-    GpioPin(
-        SPI1_CS0_GPIO_Port,
-        SPI1_CS0_Pin
-    ),
-    &hspi1
-    // correct is_inverted and elec_offset values will be set by apply_calibration
-);
-VBInverter motor_inverter(
-    &hadc1,
-    &hadc2
-);
+// correct is_inverted and elec_offset values will be set by apply_calibration
+AS5047P motor_encoder(GpioPin(SPI1_CS0_GPIO_Port, SPI1_CS0_Pin), &hspi1);
+VBInverter motor_inverter(&hadc1, &hadc2);
+// TODO shaft_encoder(GpioPin(SPI3_CS_GPIO_Port, SPI3_CS_Pin), &hspi3);
 
-/*
-TODO shaft_encoder(
-    GpioPin(
-        SPI3_CS_GPIO_Port,
-        SPI3_CS_Pin
-    ),
-    &hspi3,
-);
-*/
-
-std::unique_ptr<VBDrive> motor;
+std::shared_ptr<VBDrive> motor;
+std::shared_ptr<VBDrive> get_motor() {
+    return motor;
+}
 CalibrationData calibration_data;
 
 #ifdef DEBUG
@@ -87,8 +72,7 @@ static volatile float value_mcu_temp = 0;
     }
     eeprom.delay();
 
-    /*
-    motor = std::make_unique<VBDrive>(
+    motor = std::make_shared<VBDrive>(
         0.00005f,
         // Main control regulator (velocity and position)
         PIDConfig {},
@@ -137,26 +121,17 @@ static volatile float value_mcu_temp = 0;
         HAL_IMPORTANT(eeprom.write<CalibrationData>(&calibration_data, 0))
     }
     motor->apply_calibration(calibration_data);
-    motor->set_voltage_point(0.0f);*/
+    motor->set_voltage_point(0.0f);
 
     set_cyphal_mode(uavcan_node_Mode_1_0_OPERATIONAL);
 
     HAL_TIM_Base_Start_IT(&htim1);
-    #ifdef DEBUG
-    motor_encoder.init();
-
-    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1); // start TIM1 to trigger ADCs
-    motor_inverter.start();
-    #endif
     while(true) {
-        #ifndef DEBUG
         cyphal_loop();
-        #endif
 
         #ifdef DEBUG
-        motor_encoder.update_value();
+        motor->update_sensors();
         value_enc = motor_encoder.get_value();
-        motor_inverter.update();
         value_A = motor_inverter.get_A();
         value_B = motor_inverter.get_B();
         value_C = motor_inverter.get_C();

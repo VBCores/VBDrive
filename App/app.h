@@ -4,7 +4,7 @@
 
 #include <cyphal/cyphal.h>
 #include <voltbro/utils.hpp>
-#include <voltbro/motors/bldc/foc/foc.h>
+#include <voltbro/motors/bldc/vbdrive/vbdrive.h>
 
 // communications.cpp
 inline constexpr size_t CYPHAL_QUEUE_SIZE = 50;
@@ -23,3 +23,4 @@ millis millis_32();
 void start_timers();
 
 // app.cpp
+std::shared_ptr<VBDrive> get_motor();
