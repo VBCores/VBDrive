@@ -1,13 +1,10 @@
 #include "app.h"
 
-#include "fdcan.h"
-
 #include <cyphal/node/node_info_handler.h>
 #include <cyphal/node/registers_handler.hpp>
 #include <cyphal/providers/G4CAN.h>
 #include <cyphal/allocators/o1/o1_allocator.h>
 
-#include <voltbro/config/config.hpp>
 #include <voltbro/utils.hpp>
 
 #include <uavcan/diagnostic/Record_1_1.h>
@@ -15,20 +12,14 @@
 #include <uavcan/node/Health_1_0.h>
 #include <uavcan/node/Mode_1_0.h>
 
-
 TYPE_ALIAS(DiagnosticRecord, uavcan_diagnostic_Record_1_1)
 TYPE_ALIAS(HBeat, uavcan_node_Heartbeat_1_0)
 
-static CanardNodeID NODE_ID;
 static uint8_t CYPHAL_HEALTH_STATUS = uavcan_node_Health_1_0_NOMINAL;
 static uint8_t CYPHAL_MODE = uavcan_node_Mode_1_0_INITIALIZATION;
 static std::shared_ptr<CyphalInterface> cyphal_interface;
 static bool _is_cyphal_on = false;
 static millis delay_cyphal_until_millis = 0;
-
-CanardNodeID get_node_id() {
-    return NODE_ID;
-}
 
 std::shared_ptr<CyphalInterface> get_interface() {
     return cyphal_interface;
@@ -104,10 +95,10 @@ void cyphal_loop() {
 }
 
 void start_cyphal() {
-    NODE_ID = 11;
+    configure_fdcan(&hfdcan1);
 
     cyphal_interface = std::shared_ptr<CyphalInterface>(CyphalInterface::create_heap<G4CAN, O1Allocator>(
-        NODE_ID,
+        get_app_config().get_node_id(),
         &hfdcan1,
         CYPHAL_QUEUE_SIZE,
         utilities

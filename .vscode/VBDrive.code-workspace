@@ -99,7 +99,8 @@
 			"forward_list": "cpp",
 			"__verbose_abort": "cpp",
 			"execution": "cpp",
-			"print": "cpp"
+			"print": "cpp",
+			"fdcan.h": "c"
 		},
 		"cortex-debug.variableUseNaturalFormat": true
 	}

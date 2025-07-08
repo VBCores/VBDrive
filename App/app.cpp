@@ -6,7 +6,7 @@
 #include "tim.h"
 #include "i2c.h"
 #include "adc.h"
-#include "fdcan.h"
+
 #include "spi.h"
 #include "cordic.h"
 
@@ -23,7 +23,7 @@
 
 #include <voltbro/eeprom/eeprom.hpp>
 #include <voltbro/encoders/ASxxxx/AS5047P.hpp>
-#include <voltbro/motors/bldc/vbdrive/vbdrive.h>
+#include <voltbro/motors/bldc/vbdrive/vbdrive.hpp>
 #include <voltbro/utils.hpp>
 #pragma endregion
 
@@ -41,6 +41,9 @@ void setup_cordic() {
 }
 
 EEPROM eeprom(&hi2c2);
+EEPROM& get_eeprom() {
+    return eeprom;
+}
 
 // correct is_inverted and elec_offset values will be set by apply_calibration
 AS5047P motor_encoder(GpioPin(SPI1_CS0_GPIO_Port, SPI1_CS0_Pin), &hspi1);
@@ -53,24 +56,18 @@ std::shared_ptr<VBDrive> get_motor() {
 }
 CalibrationData calibration_data;
 
-#ifdef DEBUG
-static volatile encoder_data value_enc = 0;
-static volatile float value_A = 0;
-static volatile float value_B = 0;
-static volatile float value_C = 0;
-static volatile float value_V = 0;
-static volatile float value_stator_temp = 0;
-static volatile float value_mcu_temp = 0;
-#endif
 [[noreturn]] void app() {
-    setup_cordic();
     start_timers();
-    start_cyphal();
 
     while (!eeprom.is_connected()) {
         eeprom.delay();
     }
     eeprom.delay();
+    auto& app_config = get_app_config();
+    app_config.init();
+
+    setup_cordic();
+    start_cyphal();
 
     motor = std::make_shared<VBDrive>(
         0.00005f,
@@ -102,7 +99,7 @@ static volatile float value_mcu_temp = 0;
             .en_pin = GpioPin(DRV_WAKE_GPIO_Port, DRV_WAKE_Pin),
             .common = {
                 .ppairs = 14,
-                .gear_ratio = 1
+                .gear_ratio = 64
             }
         },
         &htim1,
@@ -111,37 +108,29 @@ static volatile float value_mcu_temp = 0;
     );
     HAL_Delay(1);
     motor->init();
-    motor->start();
 
-    HAL_IMPORTANT(eeprom.read<CalibrationData>(&calibration_data, 0))
-    if (calibration_data.type_id != CalibrationData::TYPE_ID || !calibration_data.was_calibrated) {
-        calibration_data.reset();
-        motor->calibrate(calibration_data);
-        calibration_data.was_calibrated = true;
-        HAL_IMPORTANT(eeprom.write<CalibrationData>(&calibration_data, 0))
+    if (app_config.is_app_running()) {
+        motor->start();
+
+        HAL_IMPORTANT(eeprom.read<CalibrationData>(&calibration_data, 0))
+        if (calibration_data.type_id != CalibrationData::TYPE_ID || !calibration_data.was_calibrated) {
+            calibration_data.reset();
+            motor->calibrate(calibration_data);
+            calibration_data.was_calibrated = true;
+            HAL_IMPORTANT(eeprom.write<CalibrationData>(&calibration_data, 0))
+        }
+        motor->apply_calibration(calibration_data);
+        motor->set_voltage_point(0.0f);
+
+        set_cyphal_mode(uavcan_node_Mode_1_0_OPERATIONAL);
     }
-    motor->apply_calibration(calibration_data);
-    motor->set_voltage_point(0.0f);
-
-    set_cyphal_mode(uavcan_node_Mode_1_0_OPERATIONAL);
 
     HAL_TIM_Base_Start_IT(&htim1);
-    while(true) {
-        cyphal_loop();
-
-        #ifdef DEBUG
-        motor->update_sensors();
-        value_enc = motor_encoder.get_value();
-        value_A = motor_inverter.get_A();
-        value_B = motor_inverter.get_B();
-        value_C = motor_inverter.get_C();
-        value_V = motor_inverter.get_busV();
-        value_stator_temp = motor_inverter.get_stator_temperature();
-        value_mcu_temp = motor_inverter.get_mcu_temperature();
-        #endif
-    }
+    while(true) {}
 }
 
+#define NO_CYPHAL
+#ifndef NO_CYPHAL
 #pragma region Cyphal
 TYPE_ALIAS(Real32, uavcan_primitive_scalar_Real32_1_0)
 TYPE_ALIAS(AngularVelocity, uavcan_si_unit_angular_velocity_Scalar_1_0)
@@ -201,7 +190,7 @@ void setup_subscriptions() {
     );
 
     auto cyphal_interface = get_interface();
-    const auto node_id = get_node_id();
+    const auto node_id = get_app_config().get_node_id();
 
     registers_handler.create(
         std::array<RegisterDefinition, 1>{{
@@ -278,3 +267,4 @@ void setup_subscriptions() {
     ))
 }
 #pragma endregion
+#endif
