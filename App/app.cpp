@@ -40,7 +40,7 @@ void setup_cordic() {
     HAL_IMPORTANT(HAL_CORDIC_Configure(&hcordic, &cordic_config));
 }
 
-EEPROM eeprom(&hi2c2);
+EEPROM eeprom(&hi2c2, 64, I2C_MEMADD_SIZE_16BIT);
 EEPROM& get_eeprom() {
     return eeprom;
 }
@@ -59,20 +59,29 @@ CalibrationData calibration_data;
 [[noreturn]] void app() {
     start_timers();
 
-    while (!eeprom.is_connected()) {
-        eeprom.delay();
-    }
-    eeprom.delay();
+    eeprom.wait_until_available();
     auto& app_config = get_app_config();
     app_config.init();
+    auto& config_data = app_config.get_config();
 
     setup_cordic();
     start_cyphal();
 
     motor = std::make_shared<VBDrive>(
         0.00005f,
+        KalmanConfig {
+            .expected_a = value_or_default(config_data.filter_a, 0),
+            .g1 = value_or_default(config_data.filter_g1, 0.003785056342917592f),
+            .g2 = value_or_default(config_data.filter_g1, 0.11891101743266574f),
+            .g3 = value_or_default(config_data.filter_g1, 1.5473769821028327f),
+        },
         // Main control regulator (velocity and position)
-        PIDConfig {},
+        PIDConfig {
+            .multiplier = 1.0f,
+            .kp = value_or_default(config_data.kp, 0.0f),
+            .ki = value_or_default(config_data.ki, 0.0f),
+            .kd = value_or_default(config_data.kd, 0.0f),
+        },
         // Q Regulator
         PIDConfig {
             .multiplier = 1.0f,
@@ -86,20 +95,25 @@ CalibrationData calibration_data;
             .ki = 800.0f,
         },
         DriveLimits {
-            .user_current_limit = 10.0f,
+            .user_current_limit = value_or_default(config_data.max_current, 10.0f),
+            .user_torque_limit = value_or_default(config_data.max_torque, 5.0f),
+            .user_speed_limit = value_or_default(config_data.max_speed, 5.0f),
+            .user_position_lower_limit = value_or_default(config_data.min_angle, 5.0f),
+            .user_position_upper_limit = value_or_default(config_data.max_angle, 5.0f),
         },
         DriveInfo {
-            .torque_const = 0.42f,  // Nm / A == V / (rad/s)
+            .torque_const = value_or_default(config_data.torque_const, 0.42f),
             .max_current = 10.0f,
             .max_torque = 10.0f,
             .stall_current = 6.0f,
             .stall_timeout = 3.0f,
             .stall_tolerance = 0.2f,
-            .calibration_voltage = 0.5f,
+            .calibration_voltage = 0.4f,
             .en_pin = GpioPin(DRV_WAKE_GPIO_Port, DRV_WAKE_Pin),
             .common = {
                 .ppairs = 14,
-                .gear_ratio = 64
+                .gear_ratio = 64,
+                .user_angle_offset = value_or_default(config_data.angle_offset, 0.0f)
             }
         },
         &htim1,

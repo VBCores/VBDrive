@@ -32,9 +32,22 @@ extern FDCAN_HandleTypeDef hfdcan1;
 
 // config.cpp
 struct VBDriveConfig: public BaseConfigData {
-    static constexpr uint32_t TYPE_ID = 0xAAAAEF01;
-    int test_param1 = 0;
-    float test_param2 = 0.0f;
+    static constexpr uint32_t TYPE_ID = 0x22AAABBB;
+    // NAN means not set
+    float max_current = NAN;
+    float max_torque = NAN;
+    float max_speed = NAN;
+    float angle_offset = NAN;
+    float min_angle = NAN;
+    float max_angle = NAN;
+    float torque_const = NAN;
+    float kp = NAN;
+    float ki = NAN;
+    float kd = NAN;
+    float filter_a = 0.0f;
+    float filter_g1 = NAN;
+    float filter_g2 = NAN;
+    float filter_g3 = NAN;
 
     VBDriveConfig() {
         type_id = VBDriveConfig::TYPE_ID;
@@ -42,9 +55,13 @@ struct VBDriveConfig: public BaseConfigData {
 
     bool are_required_params_set();
 
-    void get(std::string& param, UARTResponseAccumulator& responses);
-    bool set(std::string& param, std::string& value, UARTResponseAccumulator& responses);
+    void print_self(UARTResponseAccumulator& responses);
+    void get(const std::string& param, UARTResponseAccumulator& responses);
+    bool set(const std::string& param, std::string& value, UARTResponseAccumulator& responses);
 };
 using AppConfigT = AppConfigurator<VBDriveConfig, sizeof(CalibrationData) + 1>;
 AppConfigT& get_app_config();
 void configure_fdcan(FDCAN_HandleTypeDef*);
+inline float value_or_default(float value, float default_value) {
+    return std::isnan(value) ? default_value : value;
+}

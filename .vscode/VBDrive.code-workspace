@@ -100,7 +100,8 @@
 			"__verbose_abort": "cpp",
 			"execution": "cpp",
 			"print": "cpp",
-			"fdcan.h": "c"
+			"fdcan.h": "c",
+			"charconv": "cpp"
 		},
 		"cortex-debug.variableUseNaturalFormat": true
 	}

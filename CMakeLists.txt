@@ -63,6 +63,15 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     -D__FPU_PRESENT
 )
 
+add_compile_options(
+    -mfloat-abi=hard   # Use hardware FPU
+    -mfpu=fpv4-sp-d16  # For Cortex-M4
+)
+set(
+    CMAKE_EXE_LINKER_FLAGS
+    "${CMAKE_EXE_LINKER_FLAGS} -mfloat-abi=hard -mfpu=fpv4-sp-d16 -u _printf_float"
+)
+
 add_custom_command(
     POST_BUILD
     TARGET ${CMAKE_PROJECT_NAME}
