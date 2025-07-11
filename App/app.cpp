@@ -71,9 +71,9 @@ CalibrationData calibration_data;
         0.00005f,
         KalmanConfig {
             .expected_a = value_or_default(config_data.filter_a, 0),
-            .g1 = value_or_default(config_data.filter_g1, 0.003785056342917592f),
-            .g2 = value_or_default(config_data.filter_g1, 0.11891101743266574f),
-            .g3 = value_or_default(config_data.filter_g1, 1.5473769821028327f),
+            .g1 = value_or_default(config_data.filter_g1, 0.007555786034316281f),
+            .g2 = value_or_default(config_data.filter_g1, 0.47474348575882175f),
+            .g3 = value_or_default(config_data.filter_g1, 12.355571499256257f),
         },
         // Main control regulator (velocity and position)
         PIDConfig {
@@ -96,10 +96,10 @@ CalibrationData calibration_data;
         },
         DriveLimits {
             .user_current_limit = value_or_default(config_data.max_current, 10.0f),
-            .user_torque_limit = value_or_default(config_data.max_torque, 5.0f),
-            .user_speed_limit = value_or_default(config_data.max_speed, 5.0f),
-            .user_position_lower_limit = value_or_default(config_data.min_angle, 5.0f),
-            .user_position_upper_limit = value_or_default(config_data.max_angle, 5.0f),
+            .user_torque_limit = value_or_default(config_data.max_torque, NAN),
+            .user_speed_limit = value_or_default(config_data.max_speed, NAN),
+            .user_position_lower_limit = value_or_default(config_data.min_angle, NAN),
+            .user_position_upper_limit = value_or_default(config_data.max_angle, NAN),
         },
         DriveInfo {
             .torque_const = value_or_default(config_data.torque_const, 0.42f),
@@ -108,7 +108,7 @@ CalibrationData calibration_data;
             .stall_current = 6.0f,
             .stall_timeout = 3.0f,
             .stall_tolerance = 0.2f,
-            .calibration_voltage = 0.4f,
+            .calibration_voltage = 0.5f,
             .en_pin = GpioPin(DRV_WAKE_GPIO_Port, DRV_WAKE_Pin),
             .common = {
                 .ppairs = 14,
