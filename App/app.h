@@ -32,7 +32,8 @@ extern FDCAN_HandleTypeDef hfdcan1;
 
 // config.cpp
 struct VBDriveConfig: public BaseConfigData {
-    static constexpr uint32_t TYPE_ID = 0x22AAABBB;
+    static constexpr uint32_t TYPE_ID = 0x44CCCBBB;
+    uint8_t gear_ratio;
     // NAN means not set
     float max_current = NAN;
     float max_torque = NAN;
@@ -44,13 +45,15 @@ struct VBDriveConfig: public BaseConfigData {
     float kp = NAN;
     float ki = NAN;
     float kd = NAN;
-    float filter_a = 0.0f;
+    float filter_a = NAN;
     float filter_g1 = NAN;
     float filter_g2 = NAN;
     float filter_g3 = NAN;
 
     VBDriveConfig() {
         type_id = VBDriveConfig::TYPE_ID;
+        gear_ratio = 1;
+        filter_a = 0.0f;
     }
 
     bool are_required_params_set();
@@ -62,6 +65,13 @@ struct VBDriveConfig: public BaseConfigData {
 using AppConfigT = AppConfigurator<VBDriveConfig, sizeof(CalibrationData) + 1>;
 AppConfigT& get_app_config();
 void configure_fdcan(FDCAN_HandleTypeDef*);
-inline float value_or_default(float value, float default_value) {
+
+template <typename T>
+inline T value_or_default(T value, T default_value) {
     return std::isnan(value) ? default_value : value;
+}
+
+template <typename T>
+inline T value_or_default(T value, T default_value, T not_set_value) {
+    return (value == not_set_value) ? default_value : value;
 }

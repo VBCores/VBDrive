@@ -67,44 +67,51 @@ CalibrationData calibration_data;
     setup_cordic();
     start_cyphal();
 
+    const float MAX_VOLTAGE = 50.0f;
+    const float MAX_USER_CURRENT = value_or_default(config_data.max_current, 10.0f);
     motor = std::make_shared<VBDrive>(
         0.00005f,
         KalmanConfig {
-            .expected_a = value_or_default(config_data.filter_a, 0),
-            .g1 = value_or_default(config_data.filter_g1, 0.007555786034316281f),
-            .g2 = value_or_default(config_data.filter_g1, 0.47474348575882175f),
-            .g3 = value_or_default(config_data.filter_g1, 12.355571499256257f),
+            .expected_a = value_or_default(config_data.filter_a, 0.0f),
+            .g1 = value_or_default(config_data.filter_g1, 0.06598266439978051f),
+            .g2 = value_or_default(config_data.filter_g1, 37.30880268409287f),
+            .g3 = value_or_default(config_data.filter_g1, 8738.342694769584f),
         },
-        // Main control regulator (velocity and position)
+        // Control regulator for dedicated control (velocity and position)
         PIDConfig {
             .multiplier = 1.0f,
             .kp = value_or_default(config_data.kp, 0.0f),
             .ki = value_or_default(config_data.ki, 0.0f),
             .kd = value_or_default(config_data.kd, 0.0f),
+            .integral_error_lim = MAX_USER_CURRENT,
+            .max_output = MAX_USER_CURRENT,
+            .min_output = -MAX_USER_CURRENT,
         },
         // Q Regulator
         PIDConfig {
             .multiplier = 1.0f,
             .kp = 10.0f,
-            .ki = 800.0f
+            .ki = 800.0f,
+            .integral_error_lim = MAX_VOLTAGE,
         },
         // D Regulator
         PIDConfig {
             .multiplier = 1.0f,
             .kp = 10.0f,
             .ki = 800.0f,
+            .integral_error_lim = MAX_VOLTAGE,
         },
         DriveLimits {
-            .user_current_limit = value_or_default(config_data.max_current, 10.0f),
+            .user_current_limit = MAX_USER_CURRENT,
             .user_torque_limit = value_or_default(config_data.max_torque, NAN),
             .user_speed_limit = value_or_default(config_data.max_speed, NAN),
             .user_position_lower_limit = value_or_default(config_data.min_angle, NAN),
             .user_position_upper_limit = value_or_default(config_data.max_angle, NAN),
         },
         DriveInfo {
-            .torque_const = value_or_default(config_data.torque_const, 0.42f),
+            .torque_const = value_or_default(config_data.torque_const, 1.0f),
             .max_current = 10.0f,
-            .max_torque = 10.0f,
+            .max_torque = 100.0f,
             .stall_current = 6.0f,
             .stall_timeout = 3.0f,
             .stall_tolerance = 0.2f,
@@ -112,7 +119,11 @@ CalibrationData calibration_data;
             .en_pin = GpioPin(DRV_WAKE_GPIO_Port, DRV_WAKE_Pin),
             .common = {
                 .ppairs = 14,
-                .gear_ratio = 64,
+                .gear_ratio = value_or_default(
+                    config_data.gear_ratio,
+                    static_cast<uint8_t>(36),
+                    static_cast<uint8_t>(0)
+            ),
                 .user_angle_offset = value_or_default(config_data.angle_offset, 0.0f)
             }
         },
@@ -139,8 +150,35 @@ CalibrationData calibration_data;
         set_cyphal_mode(uavcan_node_Mode_1_0_OPERATIONAL);
     }
 
-    HAL_TIM_Base_Start_IT(&htim1);
-    while(true) {}
+    // separate 20Khz timer (tim1 is 80, cpu not catching up)
+    HAL_TIM_Base_Start_IT(&htim4);
+
+    micros total_time_us = 0;
+    micros idle_time_us = 0;
+    micros last_time = micros_64();
+    while(true) {
+        uint64_t idle_start = micros_64();
+        __WFI();  // Idle
+        uint64_t idle_end = micros_64();
+
+        idle_time_us += subtract_64(idle_end, idle_start);
+
+        uint64_t now = micros_64();
+        total_time_us += subtract_64(now, last_time);
+        last_time = now;
+
+        if (total_time_us >= MICROS_S) {
+            float usage = 100.0f * (1.0f - ((float)idle_time_us / total_time_us));
+            UARTResponseAccumulator responses(&huart2);
+            responses.append("FOC CPU usage: %.2f%%\n", usage);
+            idle_time_us = 0;
+            total_time_us = 0;
+        }
+
+        #ifndef CYPHAL_IN_INTERRUPT
+        cyphal_loop();
+        #endif
+    }
 }
 
 #define NO_CYPHAL

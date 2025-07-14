@@ -57,6 +57,8 @@ bool VBDriveConfig::are_required_params_set() {
     return true;
 }
 
+static constexpr std::string GEAR_RATIO_PARAM = "gear_ratio";
+static constexpr std::string MAX_CURRENT_PARAM = "max_current";
 static constexpr std::string MAX_SPEED_PARAM = "max_speed";
 static constexpr std::string MAX_TORQUE_PARAM = "max_torque";
 static constexpr std::string ANGLE_OFFSET_PARAM = "angle_offset";
@@ -72,6 +74,8 @@ static constexpr std::string FILTER_G2_PARAM = "filter_g2";
 static constexpr std::string FILTER_G3_PARAM = "filter_g3";
 
 void VBDriveConfig::print_self(UARTResponseAccumulator& responses) {
+    get(GEAR_RATIO_PARAM, responses);
+    get(MAX_CURRENT_PARAM, responses);
     get(MAX_SPEED_PARAM, responses);
     get(MAX_TORQUE_PARAM, responses);
     get(ANGLE_OFFSET_PARAM, responses);
@@ -96,19 +100,21 @@ void VBDriveConfig::get(const std::string& param, UARTResponseAccumulator& respo
     if (get_base_params(this, param, responses)) {
         return;
     }
-    CHECK_AND_PRINT_PARAM(max_speed, MAX_SPEED_PARAM)
-    CHECK_AND_PRINT_PARAM(max_torque, MAX_TORQUE_PARAM)
-    CHECK_AND_PRINT_PARAM(angle_offset, ANGLE_OFFSET_PARAM)
-    CHECK_AND_PRINT_PARAM(min_angle, MIN_ANGLE_PARAM)
-    CHECK_AND_PRINT_PARAM(max_angle, MAX_ANGLE_PARAM)
-    CHECK_AND_PRINT_PARAM(torque_const, TORQUE_CONST_PARAM)
-    CHECK_AND_PRINT_PARAM(ki, KI_PARAM)
-    CHECK_AND_PRINT_PARAM(kp, KP_PARAM)
-    CHECK_AND_PRINT_PARAM(kd, KD_PARAM)
-    CHECK_AND_PRINT_PARAM(filter_a, FILTER_A_PARAM)
-    CHECK_AND_PRINT_PARAM(filter_g1, FILTER_G1_PARAM)
-    CHECK_AND_PRINT_PARAM(filter_g2, FILTER_G2_PARAM)
-    CHECK_AND_PRINT_PARAM(filter_g3, FILTER_G3_PARAM)
+    CHECK_AND_PRINT_PARAM_INT(static_cast<int>(gear_ratio), GEAR_RATIO_PARAM)
+    CHECK_AND_PRINT_PARAM_FLOAT(max_current, MAX_CURRENT_PARAM)
+    CHECK_AND_PRINT_PARAM_FLOAT(max_speed, MAX_SPEED_PARAM)
+    CHECK_AND_PRINT_PARAM_FLOAT(max_torque, MAX_TORQUE_PARAM)
+    CHECK_AND_PRINT_PARAM_FLOAT(angle_offset, ANGLE_OFFSET_PARAM)
+    CHECK_AND_PRINT_PARAM_FLOAT(min_angle, MIN_ANGLE_PARAM)
+    CHECK_AND_PRINT_PARAM_FLOAT(max_angle, MAX_ANGLE_PARAM)
+    CHECK_AND_PRINT_PARAM_FLOAT(torque_const, TORQUE_CONST_PARAM)
+    CHECK_AND_PRINT_PARAM_FLOAT(ki, KI_PARAM)
+    CHECK_AND_PRINT_PARAM_FLOAT(kp, KP_PARAM)
+    CHECK_AND_PRINT_PARAM_FLOAT(kd, KD_PARAM)
+    CHECK_AND_PRINT_PARAM_FLOAT(filter_a, FILTER_A_PARAM)
+    CHECK_AND_PRINT_PARAM_FLOAT(filter_g1, FILTER_G1_PARAM)
+    CHECK_AND_PRINT_PARAM_FLOAT(filter_g2, FILTER_G2_PARAM)
+    CHECK_AND_PRINT_PARAM_FLOAT(filter_g3, FILTER_G3_PARAM)
     else {
         responses.append("ERROR: Unknown parameter\n\r");
     }
@@ -121,27 +127,37 @@ bool VBDriveConfig::set(const std::string& param, std::string& value, UARTRespon
         return result;
     }
 
+    int new_int_value;
     float new_float_value;
     bool is_converted = false;
-    is_converted = safe_stof(value, new_float_value);
+    if (param == GEAR_RATIO_PARAM) {
+        is_converted = safe_stoi(value, new_int_value);
+    } else {
+        is_converted = safe_stof(value, new_float_value);
+    }
     if (!is_converted) {
         responses.append("ERROR: Invalid value\n\r");
         return false;
     }
 
-    CHECK_AND_SET_PARAM(max_speed, MAX_SPEED_PARAM)
-    CHECK_AND_SET_PARAM(max_torque, MAX_TORQUE_PARAM)
-    CHECK_AND_SET_PARAM(angle_offset, ANGLE_OFFSET_PARAM)
-    CHECK_AND_SET_PARAM(min_angle, MIN_ANGLE_PARAM)
-    CHECK_AND_SET_PARAM(max_angle, MAX_ANGLE_PARAM)
-    CHECK_AND_SET_PARAM(torque_const, TORQUE_CONST_PARAM)
-    CHECK_AND_SET_PARAM(ki, KI_PARAM)
-    CHECK_AND_SET_PARAM(kp, KP_PARAM)
-    CHECK_AND_SET_PARAM(kd, KD_PARAM)
-    CHECK_AND_SET_PARAM(filter_a, FILTER_A_PARAM)
-    CHECK_AND_SET_PARAM(filter_g1, FILTER_G1_PARAM)
-    CHECK_AND_SET_PARAM(filter_g2, FILTER_G2_PARAM)
-    CHECK_AND_SET_PARAM(filter_g3, FILTER_G3_PARAM)
+    if (param == GEAR_RATIO_PARAM) {
+        gear_ratio = static_cast<uint8_t>(new_int_value);
+        responses.append("OK: gear_ration :%d\n\r", static_cast<int>(gear_ratio));
+    }
+    CHECK_AND_SET_PARAM_FLOAT(max_current, MAX_CURRENT_PARAM)
+    CHECK_AND_SET_PARAM_FLOAT(max_speed, MAX_SPEED_PARAM)
+    CHECK_AND_SET_PARAM_FLOAT(max_torque, MAX_TORQUE_PARAM)
+    CHECK_AND_SET_PARAM_FLOAT(angle_offset, ANGLE_OFFSET_PARAM)
+    CHECK_AND_SET_PARAM_FLOAT(min_angle, MIN_ANGLE_PARAM)
+    CHECK_AND_SET_PARAM_FLOAT(max_angle, MAX_ANGLE_PARAM)
+    CHECK_AND_SET_PARAM_FLOAT(torque_const, TORQUE_CONST_PARAM)
+    CHECK_AND_SET_PARAM_FLOAT(ki, KI_PARAM)
+    CHECK_AND_SET_PARAM_FLOAT(kp, KP_PARAM)
+    CHECK_AND_SET_PARAM_FLOAT(kd, KD_PARAM)
+    CHECK_AND_SET_PARAM_FLOAT(filter_a, FILTER_A_PARAM)
+    CHECK_AND_SET_PARAM_FLOAT(filter_g1, FILTER_G1_PARAM)
+    CHECK_AND_SET_PARAM_FLOAT(filter_g2, FILTER_G2_PARAM)
+    CHECK_AND_SET_PARAM_FLOAT(filter_g3, FILTER_G3_PARAM)
     else {
         responses.append("ERROR: Unknown parameter\n\r");
         return false;

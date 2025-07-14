@@ -2,10 +2,11 @@
 
 #include "tim.h"
 
+// Volatile is absolutely required here due to timer interrupt
+// Otherwise HAL_Delay() will not work
 static volatile uint32_t millis_k __attribute__ ((__aligned__(4))) = 0;
 
-#define DEBUG
-#ifdef DEBUG
+#ifdef MONITOR
 static volatile encoder_data value_enc = 0;
 static volatile float value_A = 0;
 static volatile float value_B = 0;
@@ -13,29 +14,34 @@ static volatile float value_C = 0;
 static volatile float value_V = 0;
 static volatile float value_stator_temp = 0;
 static volatile float value_mcu_temp = 0;
-static volatile float debug_voltage = 0;
+
+static volatile float debug_torque = 0.0f;
+static volatile float debug_angle = 0.0f;
+static volatile float debug_velocity = 0.0f;
+static volatile float debug_angle_kp = 0.0f;
+static volatile float debug_velocity_kp = 0.0f;
+static volatile float debug_voltage = 0.0f;
 #endif
 
-void main_callback() {
+inline void main_callback() {
     auto& app_config = get_app_config();
 
     if (app_config.is_app_running()) {
-        auto motor = get_motor();
-        motor->update();
+        #ifdef CYPHAL_IN_INTERRUPT
         cyphal_loop();
+        #endif
+        get_motor()->update();
     }
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
-    if (htim->Instance == TIM2) {
+    if (htim->Instance == TIM6) {
+        millis_k += 1;
+    } else if (htim->Instance == TIM2) {
         HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
-    }
-    else if (htim->Instance == TIM1) {
-        main_callback();
-
-        #ifdef DEBUG
+    } else if (htim->Instance == TIM4) {
+        #ifdef MONITOR
         auto motor = get_motor();
-        motor->update_sensors();
         auto encoder = motor->get_encoder();
         auto inverter = static_cast<const VBInverter&>(motor->get_inverter());
         value_enc = encoder.get_value();
@@ -45,11 +51,22 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
         value_V = inverter.get_busV();
         value_stator_temp = inverter.get_stator_temperature();
         value_mcu_temp = inverter.get_mcu_temperature();
-        motor->set_voltage_point(debug_voltage);
+
+        if (debug_voltage >= 0.0f) {
+            motor->set_voltage_point(debug_voltage);
+        }
+        else {
+            motor->set_foc_point(FOCTarget{
+                .torque = debug_torque,
+                .angle = debug_angle,
+                .velocity = debug_velocity,
+                .angle_kp = debug_angle_kp,
+                .velocity_kp = debug_velocity_kp,
+            });
+        }
         #endif
-    }
-    else if (htim->Instance == TIM6) {
-        millis_k += 1;
+
+        main_callback();
     }
 }
 
