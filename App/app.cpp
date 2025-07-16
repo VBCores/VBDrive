@@ -20,6 +20,8 @@
 #include <uavcan/si/unit/angle/Scalar_1_0.h>
 #include <uavcan/si/unit/torque/Scalar_1_0.h>
 #include <uavcan/si/unit/voltage/Scalar_1_0.h>
+#include <voltbro/foc/command_1_0.h>
+#include <voltbro/foc/specific_control_1_0.h>
 
 #include <voltbro/eeprom/eeprom.hpp>
 #include <voltbro/encoders/ASxxxx/AS5047P.hpp>
@@ -54,23 +56,17 @@ std::shared_ptr<VBDrive> motor;
 std::shared_ptr<VBDrive> get_motor() {
     return motor;
 }
-CalibrationData calibration_data;
 
-[[noreturn]] void app() {
-    start_timers();
-
-    eeprom.wait_until_available();
-    auto& app_config = get_app_config();
-    app_config.init();
-    auto& config_data = app_config.get_config();
-
-    setup_cordic();
-    start_cyphal();
-
+void create_motor(VBDriveConfig& config_data) {
+    // hardware limit
     const float MAX_VOLTAGE = 50.0f;
+
+    // user-defined limit, can be superseded by motor parameters (stall, etc.)
     const float MAX_USER_CURRENT = value_or_default(config_data.max_current, 10.0f);
+
     motor = std::make_shared<VBDrive>(
         0.00005f,
+        // Kalman filter for determining electric angle
         KalmanConfig {
             .expected_a = value_or_default(config_data.filter_a, 0.0f),
             .g1 = value_or_default(config_data.filter_g1, 0.06598266439978051f),
@@ -101,6 +97,7 @@ CalibrationData calibration_data;
             .ki = 800.0f,
             .integral_error_lim = MAX_VOLTAGE,
         },
+        // User-defined limits
         DriveLimits {
             .user_current_limit = MAX_USER_CURRENT,
             .user_torque_limit = value_or_default(config_data.max_torque, NAN),
@@ -108,6 +105,7 @@ CalibrationData calibration_data;
             .user_position_lower_limit = value_or_default(config_data.min_angle, NAN),
             .user_position_upper_limit = value_or_default(config_data.max_angle, NAN),
         },
+        // Built-in constant parameters
         DriveInfo {
             .torque_const = value_or_default(config_data.torque_const, 1.0f),
             .max_current = 10.0f,
@@ -133,30 +131,54 @@ CalibrationData calibration_data;
     );
     HAL_Delay(1);
     motor->init();
+}
 
-    if (app_config.is_app_running()) {
-        motor->start();
+void apply_calibration() {
+    CalibrationData calibration_data;
+    HAL_IMPORTANT(eeprom.read<CalibrationData>(&calibration_data, 0))
+    if (calibration_data.type_id != CalibrationData::TYPE_ID || !calibration_data.was_calibrated) {
+        calibration_data.reset();
+        motor->calibrate(calibration_data);
+        calibration_data.was_calibrated = true;
+        HAL_IMPORTANT(eeprom.write<CalibrationData>(&calibration_data, 0))
+    }
+    motor->apply_calibration(calibration_data);
+}
 
-        HAL_IMPORTANT(eeprom.read<CalibrationData>(&calibration_data, 0))
-        if (calibration_data.type_id != CalibrationData::TYPE_ID || !calibration_data.was_calibrated) {
-            calibration_data.reset();
-            motor->calibrate(calibration_data);
-            calibration_data.was_calibrated = true;
-            HAL_IMPORTANT(eeprom.write<CalibrationData>(&calibration_data, 0))
-        }
-        motor->apply_calibration(calibration_data);
-        motor->set_voltage_point(0.0f);
+[[noreturn]] void app() {
+    #pragma region StartupConfiguration
+    start_timers();
+    eeprom.wait_until_available();
+    auto& app_config = get_app_config();
+    app_config.init();
+    auto& config_data = app_config.get_config();
+    setup_cordic();
+    start_cyphal();
+    #pragma endregion
 
-        set_cyphal_mode(uavcan_node_Mode_1_0_OPERATIONAL);
+    create_motor(config_data);
+
+    if (!app_config.is_app_running()) {
+        // Hold here until configured and rebooted (in interrupt handler in config.cpp)
+        while (true) {}
     }
 
-    // separate 20Khz timer (tim1 is 80, cpu not catching up)
+    motor->start();
+    apply_calibration();
+    motor->set_voltage_point(0.0f);
+
+    set_cyphal_mode(uavcan_node_Mode_1_0_OPERATIONAL);
+
+    // separate 20Khz control timer (tim1 is 80Khz, CPU not catching up)
     HAL_TIM_Base_Start_IT(&htim4);
 
+    #ifdef TrackCPUUsage
     micros total_time_us = 0;
     micros idle_time_us = 0;
     micros last_time = micros_64();
+    #endif
     while(true) {
+        #ifdef TrackCPUUsage
         uint64_t idle_start = micros_64();
         __WFI();  // Idle
         uint64_t idle_end = micros_64();
@@ -174,14 +196,16 @@ CalibrationData calibration_data;
             idle_time_us = 0;
             total_time_us = 0;
         }
+        #endif
 
         #ifndef CYPHAL_IN_INTERRUPT
-        cyphal_loop();
+        if (app_config.is_app_running()) {
+            cyphal_loop();
+        }
         #endif
     }
 }
 
-#define NO_CYPHAL
 #ifndef NO_CYPHAL
 #pragma region Cyphal
 TYPE_ALIAS(Real32, uavcan_primitive_scalar_Real32_1_0)
@@ -189,15 +213,18 @@ TYPE_ALIAS(AngularVelocity, uavcan_si_unit_angular_velocity_Scalar_1_0)
 TYPE_ALIAS(Angle, uavcan_si_unit_angle_Scalar_1_0)
 TYPE_ALIAS(Torque, uavcan_si_unit_torque_Scalar_1_0)
 TYPE_ALIAS(Voltage, uavcan_si_unit_voltage_Scalar_1_0)
+TYPE_ALIAS(FOCCommand, voltbro_foc_command_1_0)
+TYPE_ALIAS(SpecificControl, voltbro_foc_specific_control_1_0)
 static constexpr CanardPortID ANGLE_PORT = 6998;
 static constexpr CanardPortID ANGULAR_VELOCITY_PORT = 7006;
 static constexpr CanardPortID TORQUE_PORT = 1423;
 static constexpr CanardPortID VOLTAGE_PORT = 3423;
+static constexpr CanardPortID FOC_COMMAND_PORT = 2107;
+static constexpr CanardPortID SPECIFIC_CONTROL_PORT = 3407;
 
 void in_loop_reporting(millis current_t) {
     static millis report_time = 0;
-    EACH_N(current_t, report_time, 2, {
-        /*  // TODO
+    EACH_N(current_t, report_time, 10, {
         Angle::Type angle_msg = {};
         angle_msg.radian = motor->get_angle();
         static CanardTransferID angle_transfer_id = 0;
@@ -207,30 +234,55 @@ void in_loop_reporting(millis current_t) {
         angle_velocity_msg.radian_per_second = motor->get_velocity();
         static CanardTransferID angle_velocity_transfer_id = 0;
         get_interface()->send_msg<AngularVelocity>(&angle_velocity_msg, ANGULAR_VELOCITY_PORT, &angle_velocity_transfer_id);
-        */
+
+        Torque::Type torque_msg = {};
+        torque_msg.newton_meter = motor->get_torque();
+        static CanardTransferID torque_transfer_id = 0;
+        get_interface()->send_msg<Torque>(&torque_msg, TORQUE_PORT, &torque_transfer_id);
     })
 }
 
-class VoltageSub: public AbstractSubscription<Voltage> {
+class SpecificControlSub: public AbstractSubscription<SpecificControl> {
 public:
-VoltageSub(InterfacePtr interface, CanardPortID port_id): AbstractSubscription<Voltage>(interface, port_id) {};
-    void handler(const Voltage::Type& msg, CanardRxTransfer* _) override {
-        //motor->set_voltage_point(msg.volt);  // TODO
+    SpecificControlSub(InterfacePtr interface, CanardPortID port_id): AbstractSubscription<SpecificControl>(interface, port_id) {};
+    void handler(const SpecificControl::Type& msg, CanardRxTransfer* _) override {
+        switch (static_cast<SetPointType>(msg.set_point_type)) {
+            case SetPointType::VELOCITY:
+                motor->set_velocity_point(msg.set_point_value);
+                break;
+            case SetPointType::TORQUE:
+                motor->set_torque_point(msg.set_point_value);
+                break;
+            case SetPointType::POSITION:
+                motor->set_angle_point(msg.set_point_value);
+                break;
+            case SetPointType::VOLTAGE:
+                motor->set_voltage_point(msg.set_point_value);
+                break;
+            default:
+                break;
+        }
     }
 };
 
-class TorqueSub: public AbstractSubscription<Torque> {
+class FOCCommandSub: public AbstractSubscription<FOCCommand> {
 public:
-TorqueSub(InterfacePtr interface, CanardPortID port_id): AbstractSubscription<Torque>(interface, port_id) {};
-    void handler(const Torque::Type& msg, CanardRxTransfer* _) override {
-        //motor->set_torque_point(msg.newton_meter);  // TODO
+    FOCCommandSub(InterfacePtr interface, CanardPortID port_id): AbstractSubscription<FOCCommand>(interface, port_id) {};
+    void handler(const FOCCommand::Type& msg, CanardRxTransfer* _) override {
+        motor->set_foc_point(FOCTarget {
+            .torque = msg._torque.newton_meter,
+            .angle = msg.angle.radian,
+            .velocity = msg.velocity.radian_per_second,
+            .angle_kp = msg.angle_kp.value,
+            .velocity_kp = msg.velocity_kp.value
+        });
     }
 };
 
 ReservedObject<NodeInfoReader> node_info_reader;
 ReservedObject<RegistersHandler<1>> registers_handler;
-ReservedObject<VoltageSub> voltage_sub;
-ReservedObject<TorqueSub> torque_sub;
+ReservedObject<SpecificControlSub> specific_control_sub;
+ReservedObject<FOCCommandSub> foc_command_sub;
 
 void setup_subscriptions() {
     HAL_FDCAN_ConfigGlobalFilter(
@@ -243,7 +295,6 @@ void setup_subscriptions() {
 
     auto cyphal_interface = get_interface();
     const auto node_id = get_app_config().get_node_id();
-
     registers_handler.create(
         std::array<RegisterDefinition, 1>{{
             {
@@ -261,12 +312,12 @@ void setup_subscriptions() {
                         // TODO: report error
                     }
 
-                    //motor->set_state(value);  // TODO
+                    motor->set_state(value);
 
                     response.persistent = true;
                     response._mutable = true;
                     v_out._tag_ = 3;
-                    //v_out.bit.value.bitpacked[0] = motor->is_on();  // TODO
+                    v_out.bit.value.bitpacked[0] = motor->is_on();
                     v_out.bit.value.count = 1;
                 }
             }
@@ -274,8 +325,6 @@ void setup_subscriptions() {
         cyphal_interface
     );
 
-    voltage_sub.create(cyphal_interface, VOLTAGE_PORT + node_id);
-    torque_sub.create(cyphal_interface, TORQUE_PORT + node_id);
     node_info_reader.create(
         cyphal_interface,
         "org.voltbro.vbdrive",
@@ -284,6 +333,9 @@ void setup_subscriptions() {
         uavcan_node_Version_1_0{1, 0},
         0
     );
+
+    specific_control_sub.create(cyphal_interface, SPECIFIC_CONTROL_PORT + node_id);
+    foc_command_sub.create(cyphal_interface, FOC_COMMAND_PORT + node_id);
 
     static FDCAN_FilterTypeDef sFilterConfig;
     uint32_t filter_index = 0;
@@ -307,7 +359,7 @@ void setup_subscriptions() {
         filter_index,
         &hfdcan1,
         &sFilterConfig,
-        voltage_sub->make_filter(node_id)
+        foc_command_sub->make_filter(node_id)
     ))
 
     filter_index += 1;
@@ -315,7 +367,7 @@ void setup_subscriptions() {
         filter_index,
         &hfdcan1,
         &sFilterConfig,
-        torque_sub->make_filter(node_id)
+        specific_control_sub->make_filter(node_id)
     ))
 }
 #pragma endregion

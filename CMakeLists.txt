@@ -54,12 +54,12 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Drivers/libcxxcanard/libs
     Drivers/libvoltbro
     Drivers/CMSIS/DSP/Include
+    Drivers/cyphal_types
 )
 
 if(CMAKE_BUILD_TYPE MATCHES RelWithDebInfo)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O1 -g3")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -g1")
     target_compile_definitions(${CMAKE_PROJECT_NAME} PUBLIC
-        -DMONITOR
         -DCYPHAL_IN_INTERRUPT
     )
 endif()
