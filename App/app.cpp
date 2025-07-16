@@ -176,9 +176,7 @@ void apply_calibration() {
     micros total_time_us = 0;
     micros idle_time_us = 0;
     micros last_time = micros_64();
-    #endif
     while(true) {
-        #ifdef TrackCPUUsage
         uint64_t idle_start = micros_64();
         __WFI();  // Idle
         uint64_t idle_end = micros_64();
@@ -196,14 +194,10 @@ void apply_calibration() {
             idle_time_us = 0;
             total_time_us = 0;
         }
-        #endif
-
-        #ifndef CYPHAL_IN_INTERRUPT
-        if (app_config.is_app_running()) {
-            cyphal_loop();
-        }
-        #endif
     }
+    #else
+    while(true) {}
+    #endif
 }
 
 #ifndef NO_CYPHAL

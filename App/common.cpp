@@ -27,12 +27,10 @@ inline void main_callback() {
     auto& app_config = get_app_config();
 
     if (app_config.is_app_running()) {
-        #ifdef CYPHAL_IN_INTERRUPT
         static millis last_cyphal_call = 0;
         EACH_N(millis_k, last_cyphal_call, 2, {
             cyphal_loop();
         })
-        #endif
         get_motor()->update();
     }
 }
