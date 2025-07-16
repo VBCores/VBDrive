@@ -61,6 +61,7 @@ if(CMAKE_BUILD_TYPE MATCHES RelWithDebInfo)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -g1")
     target_compile_definitions(${CMAKE_PROJECT_NAME} PUBLIC
         -DCYPHAL_IN_INTERRUPT
+        -DTrackCPUUsage
     )
 endif()
 if(CMAKE_BUILD_TYPE MATCHES Debug)

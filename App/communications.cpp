@@ -82,7 +82,7 @@ void cyphal_loop() {
         millis current_t = millis_32();
         in_loop_reporting(current_t);
 
-        static micros heartbeat_time = 0;
+        static millis heartbeat_time = 0;
         EACH_N(current_t, heartbeat_time, 1000, {
             heartbeat();
         })
