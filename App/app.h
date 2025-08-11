@@ -32,7 +32,7 @@ extern FDCAN_HandleTypeDef hfdcan1;
 
 // config.cpp
 struct VBDriveConfig: public BaseConfigData {
-    static constexpr uint32_t TYPE_ID = 0x44CCCBBB;
+    static constexpr uint32_t TYPE_ID = 0x55CCCFFF;
     uint8_t gear_ratio;
     // NAN means not set
     float max_current = NAN;

@@ -50,7 +50,6 @@ EEPROM& get_eeprom() {
 // correct is_inverted and elec_offset values will be set by apply_calibration
 AS5047P motor_encoder(GpioPin(SPI1_CS0_GPIO_Port, SPI1_CS0_Pin), &hspi1);
 VBInverter motor_inverter(&hadc1, &hadc2);
-// TODO shaft_encoder(GpioPin(SPI3_CS_GPIO_Port, SPI3_CS_Pin), &hspi3);
 
 std::shared_ptr<VBDrive> motor;
 std::shared_ptr<VBDrive> get_motor() {
@@ -127,9 +126,11 @@ void create_motor(VBDriveConfig& config_data) {
         },
         &htim1,
         motor_encoder,
-        motor_inverter
+        motor_inverter,
+        &hspi3,
+        GpioPin(SPI3_CS_GPIO_Port, SPI3_CS_Pin)
     );
-    HAL_Delay(1);
+    HAL_Delay(100);
     motor->init();
 }
 

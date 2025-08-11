@@ -101,7 +101,8 @@
 			"execution": "cpp",
 			"print": "cpp",
 			"fdcan.h": "c",
-			"charconv": "cpp"
+			"charconv": "cpp",
+			"__node_handle": "cpp"
 		},
 		"cortex-debug.variableUseNaturalFormat": true
 	}

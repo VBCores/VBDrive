@@ -26,12 +26,22 @@ static volatile float debug_voltage = 0.0f;
 inline void main_callback() {
     auto& app_config = get_app_config();
 
+    // it can never start at 0t, so 0 is "not set" value
+    static micros last_call = 0;
+    float dt = 0;
+    micros now = micros_64();
+    if (last_call != 0) {
+        micros diff = subtract_64(now, last_call);
+        dt = (float)diff / (float)MICROS_S;
+    }
+    last_call = now;
+
     if (app_config.is_app_running()) {
         static millis last_cyphal_call = 0;
         EACH_N(millis_k, last_cyphal_call, 2, {
             cyphal_loop();
         })
-        get_motor()->update();
+        get_motor()->update_with_dt(dt);
     }
 }
 
@@ -39,7 +49,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
     if (htim->Instance == TIM6) {
         millis_k += 1;
     } else if (htim->Instance == TIM2) {
-        HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
+        HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
     } else if (htim->Instance == TIM4) {
         #ifdef MONITOR
         auto motor = get_motor();
