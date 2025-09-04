@@ -20,7 +20,8 @@ static volatile float debug_angle = 0.0f;
 static volatile float debug_velocity = 0.0f;
 static volatile float debug_angle_kp = 0.0f;
 static volatile float debug_velocity_kp = 0.0f;
-static volatile float debug_voltage = 0.0f;
+static volatile float debug_voltage = -1.0f;
+static volatile float dt_mean = 0.0f;
 #endif
 
 inline void main_callback() {
@@ -35,6 +36,24 @@ inline void main_callback() {
         dt = (float)diff / (float)MICROS_S;
     }
     last_call = now;
+
+    #ifdef MONITOR
+    constexpr size_t dt_buffer_size = 200;
+    static float dt_buffer[dt_buffer_size] = {0};
+    static int dt_index = 0;
+    static int dt_count = 0;
+    static float dt_sum = 0.0f;
+
+    if (dt_count == dt_buffer_size) {
+        dt_sum -= dt_buffer[dt_index];
+    } else {
+        dt_count++;
+    }
+    dt_buffer[dt_index] = dt;
+    dt_sum += dt;
+    dt_index = (dt_index + 1) % dt_buffer_size;
+    dt_mean = dt_sum / dt_count;
+    #endif
 
     if (app_config.is_app_running()) {
         static millis last_cyphal_call = 0;
@@ -66,7 +85,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
         if (debug_voltage >= 0.0f) {
             motor->set_voltage_point(debug_voltage);
         }
-        else {
+        else if (debug_voltage < -10.0f){
             motor->set_foc_point(FOCTarget{
                 .torque = debug_torque,
                 .angle = debug_angle,

@@ -20,6 +20,8 @@
 #include <uavcan/si/unit/angle/Scalar_1_0.h>
 #include <uavcan/si/unit/torque/Scalar_1_0.h>
 #include <uavcan/si/unit/voltage/Scalar_1_0.h>
+#include "uavcan/primitive/array/Real32_1_0.h"
+#include "uavcan/primitive/Empty_1_0.h"
 #include <voltbro/foc/command_1_0.h>
 #include <voltbro/foc/specific_control_1_0.h>
 
@@ -203,81 +205,50 @@ void apply_calibration() {
 
 #ifndef NO_CYPHAL
 #pragma region Cyphal
-TYPE_ALIAS(Real32, uavcan_primitive_scalar_Real32_1_0)
-TYPE_ALIAS(AngularVelocity, uavcan_si_unit_angular_velocity_Scalar_1_0)
-TYPE_ALIAS(Angle, uavcan_si_unit_angle_Scalar_1_0)
-TYPE_ALIAS(Torque, uavcan_si_unit_torque_Scalar_1_0)
-TYPE_ALIAS(Voltage, uavcan_si_unit_voltage_Scalar_1_0)
-TYPE_ALIAS(FOCCommand, voltbro_foc_command_1_0)
-TYPE_ALIAS(SpecificControl, voltbro_foc_specific_control_1_0)
-static constexpr CanardPortID ANGLE_PORT = 6998;
-static constexpr CanardPortID ANGULAR_VELOCITY_PORT = 7006;
-static constexpr CanardPortID TORQUE_PORT = 1423;
-static constexpr CanardPortID VOLTAGE_PORT = 3423;
-static constexpr CanardPortID FOC_COMMAND_PORT = 2107;
-static constexpr CanardPortID SPECIFIC_CONTROL_PORT = 3407;
+TYPE_ALIAS(FloatArray, uavcan_primitive_array_Real32_1_0)
+TYPE_ALIAS(EmptyMsg, uavcan_primitive_Empty_1_0)
+static constexpr CanardPortID LCM_RX_PORT = 1100;
+static constexpr CanardPortID LCM_TX_PORT = 1101;
 
 void in_loop_reporting(millis current_t) {
     static millis report_time = 0;
-    EACH_N(current_t, report_time, 10, {
-        Angle::Type angle_msg = {};
-        angle_msg.radian = motor->get_angle();
-        static CanardTransferID angle_transfer_id = 0;
-        get_interface()->send_msg<Angle>(&angle_msg, ANGLE_PORT, &angle_transfer_id);
-
-        AngularVelocity::Type angle_velocity_msg = {};
-        angle_velocity_msg.radian_per_second = motor->get_velocity();
-        static CanardTransferID angle_velocity_transfer_id = 0;
-        get_interface()->send_msg<AngularVelocity>(&angle_velocity_msg, ANGULAR_VELOCITY_PORT, &angle_velocity_transfer_id);
-
-        Torque::Type torque_msg = {};
-        torque_msg.newton_meter = motor->get_torque();
-        static CanardTransferID torque_transfer_id = 0;
-        get_interface()->send_msg<Torque>(&torque_msg, TORQUE_PORT, &torque_transfer_id);
+    EACH_N(current_t, report_time, 1, {
+        FloatArray::Type report_msg = {};
+        report_msg.value.count = 8;
+        report_msg.value.elements[0] = -motor->get_angle();
+        report_msg.value.elements[1] = 0.0f;
+        report_msg.value.elements[2] = -motor->get_velocity();
+        report_msg.value.elements[3] = 0.0f;
+        report_msg.value.elements[4] = -motor->get_torque();
+        report_msg.value.elements[5] = 0.0f;
+        report_msg.value.elements[6] = 10.0f;
+        report_msg.value.elements[7] = 800.0f;
+        static CanardTransferID report_msg_transfer_id = 0;
+        get_interface()->send_msg<FloatArray>(&report_msg, LCM_RX_PORT, &report_msg_transfer_id);
     })
 }
 
-class SpecificControlSub: public AbstractSubscription<SpecificControl> {
-public:
-    SpecificControlSub(InterfacePtr interface, CanardPortID port_id): AbstractSubscription<SpecificControl>(interface, port_id) {};
-    void handler(const SpecificControl::Type& msg, CanardRxTransfer* _) override {
-        switch (static_cast<SetPointType>(msg.set_point_type)) {
-            case SetPointType::VELOCITY:
-                motor->set_velocity_point(msg.set_point_value);
-                break;
-            case SetPointType::TORQUE:
-                motor->set_torque_point(msg.set_point_value);
-                break;
-            case SetPointType::POSITION:
-                motor->set_angle_point(msg.set_point_value);
-                break;
-            case SetPointType::VOLTAGE:
-                motor->set_voltage_point(msg.set_point_value);
-                break;
-            default:
-                break;
-        }
-    }
-};
 
-class FOCCommandSub: public AbstractSubscription<FOCCommand> {
+class LCMCommandSub: public AbstractSubscription<FloatArray> {
 public:
-    FOCCommandSub(InterfacePtr interface, CanardPortID port_id): AbstractSubscription<FOCCommand>(interface, port_id) {};
-    void handler(const FOCCommand::Type& msg, CanardRxTransfer* _) override {
-        motor->set_foc_point(FOCTarget {
-            .torque = msg._torque.newton_meter,
-            .angle = msg.angle.radian,
-            .velocity = msg.velocity.radian_per_second,
-            .angle_kp = msg.angle_kp.value,
-            .velocity_kp = msg.velocity_kp.value
+    LCMCommandSub(InterfacePtr interface, CanardPortID port_id): AbstractSubscription<FloatArray>(interface, port_id) {};
+    void handler(const FloatArray::Type& msg, CanardRxTransfer*) override {
+        if (msg.value.count < 7) {
+            return;
+        }
+
+        motor->set_foc_point(FOCTarget{
+            .torque = -msg.value.elements[2],
+            .angle = -msg.value.elements[0],
+            .velocity = -msg.value.elements[1],
+            .angle_kp = -msg.value.elements[4],
+            .velocity_kp = -msg.value.elements[5]
         });
     }
 };
 
-ReservedObject<NodeInfoReader> node_info_reader;
-ReservedObject<RegistersHandler<1>> registers_handler;
-ReservedObject<SpecificControlSub> specific_control_sub;
-ReservedObject<FOCCommandSub> foc_command_sub;
+
+ReservedObject<LCMCommandSub> lcm_command_sub;
 
 void setup_subscriptions() {
     HAL_FDCAN_ConfigGlobalFilter(
@@ -290,47 +261,8 @@ void setup_subscriptions() {
 
     auto cyphal_interface = get_interface();
     const auto node_id = get_app_config().get_node_id();
-    registers_handler.create(
-        std::array<RegisterDefinition, 1>{{
-            {
-                "motor.is_on",
-                [](
-                    const uavcan_register_Value_1_0& v_in,
-                    uavcan_register_Value_1_0& v_out,
-                    RegisterAccessResponse::Type& response
-                ){
-                    static bool value = false;
-                    if (v_in._tag_ == 3) {
-                        value = v_in.bit.value.bitpacked[0] == 1;
-                    }
-                    else {
-                        // TODO: report error
-                    }
 
-                    motor->set_state(value);
-
-                    response.persistent = true;
-                    response._mutable = true;
-                    v_out._tag_ = 3;
-                    v_out.bit.value.bitpacked[0] = motor->is_on();
-                    v_out.bit.value.count = 1;
-                }
-            }
-        }},
-        cyphal_interface
-    );
-
-    node_info_reader.create(
-        cyphal_interface,
-        "org.voltbro.vbdrive",
-        uavcan_node_Version_1_0{1, 0},
-        uavcan_node_Version_1_0{1, 0},
-        uavcan_node_Version_1_0{1, 0},
-        0
-    );
-
-    specific_control_sub.create(cyphal_interface, SPECIFIC_CONTROL_PORT + node_id);
-    foc_command_sub.create(cyphal_interface, FOC_COMMAND_PORT + node_id);
+    lcm_command_sub.create(cyphal_interface, LCM_TX_PORT);
 
     static FDCAN_FilterTypeDef sFilterConfig;
     uint32_t filter_index = 0;
@@ -338,31 +270,7 @@ void setup_subscriptions() {
         filter_index,
         &hfdcan1,
         &sFilterConfig,
-        node_info_reader->make_filter(node_id)
-    ))
-
-    filter_index += 1;
-    HAL_IMPORTANT(apply_filter(
-        filter_index,
-        &hfdcan1,
-        &sFilterConfig,
-        registers_handler->make_filter(node_id)
-    ))
-
-    filter_index += 1;
-    HAL_IMPORTANT(apply_filter(
-        filter_index,
-        &hfdcan1,
-        &sFilterConfig,
-        foc_command_sub->make_filter(node_id)
-    ))
-
-    filter_index += 1;
-    HAL_IMPORTANT(apply_filter(
-        filter_index,
-        &hfdcan1,
-        &sFilterConfig,
-        specific_control_sub->make_filter(node_id)
+        lcm_command_sub->make_filter(node_id)
     ))
 }
 #pragma endregion
