@@ -14,6 +14,10 @@ static volatile float value_C = 0;
 static volatile float value_V = 0;
 static volatile float value_stator_temp = 0;
 static volatile float value_mcu_temp = 0;
+static volatile float value_angle = 0;
+static volatile float value_velocity = 0;
+static volatile float value_torque = 0;
+
 
 static volatile float debug_torque = 0.0f;
 static volatile float debug_angle = 0.0f;
@@ -21,7 +25,7 @@ static volatile float debug_velocity = 0.0f;
 static volatile float debug_angle_kp = 0.0f;
 static volatile float debug_velocity_kp = 0.0f;
 static volatile float debug_voltage = -1.0f;
-static volatile float dt_mean = 0.0f;
+static volatile float debug_dt = 0.0f;
 #endif
 
 inline void main_callback() {
@@ -34,26 +38,11 @@ inline void main_callback() {
     if (last_call != 0) {
         micros diff = subtract_64(now, last_call);
         dt = (float)diff / (float)MICROS_S;
+        #ifdef MONITOR
+        debug_dt = dt;
+        #endif
     }
     last_call = now;
-
-    #ifdef MONITOR
-    constexpr size_t dt_buffer_size = 200;
-    static float dt_buffer[dt_buffer_size] = {0};
-    static int dt_index = 0;
-    static int dt_count = 0;
-    static float dt_sum = 0.0f;
-
-    if (dt_count == dt_buffer_size) {
-        dt_sum -= dt_buffer[dt_index];
-    } else {
-        dt_count++;
-    }
-    dt_buffer[dt_index] = dt;
-    dt_sum += dt;
-    dt_index = (dt_index + 1) % dt_buffer_size;
-    dt_mean = dt_sum / dt_count;
-    #endif
 
     if (app_config.is_app_running()) {
         static millis last_cyphal_call = 0;
@@ -74,6 +63,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
         auto motor = get_motor();
         auto encoder = motor->get_encoder();
         auto inverter = static_cast<const VBInverter&>(motor->get_inverter());
+        value_angle = motor->get_angle();
+        value_velocity = motor->get_velocity();
+        value_torque = motor->get_torque();
         value_enc = encoder.get_value();
         value_A = inverter.get_A();
         value_B = inverter.get_B();

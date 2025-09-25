@@ -104,6 +104,7 @@
 			"charconv": "cpp",
 			"__node_handle": "cpp"
 		},
-		"cortex-debug.variableUseNaturalFormat": true
+		"cortex-debug.variableUseNaturalFormat": true,
+		"workbench.colorTheme": "Nord"
 	}
 }

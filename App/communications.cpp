@@ -98,7 +98,11 @@ void start_cyphal() {
     configure_fdcan(&hfdcan1);
 
     cyphal_interface = std::shared_ptr<CyphalInterface>(CyphalInterface::create_heap<G4CAN, O1Allocator>(
+        #ifndef LCM
         get_app_config().get_node_id(),
+        #else
+        10,
+        #endif
         &hfdcan1,
         CYPHAL_QUEUE_SIZE,
         utilities

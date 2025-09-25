@@ -172,106 +172,97 @@ void apply_calibration() {
 
     set_cyphal_mode(uavcan_node_Mode_1_0_OPERATIONAL);
 
-    // separate 20Khz control timer (tim1 is 80Khz, CPU not catching up)
+    // separate 20KHz control timer (tim1 is 80KHz, CPU not catching up)
     HAL_TIM_Base_Start_IT(&htim4);
 
-    #ifdef TrackCPUUsage
-    micros total_time_us = 0;
-    micros idle_time_us = 0;
-    micros last_time = micros_64();
-    while(true) {
-        uint64_t idle_start = micros_64();
-        __WFI();  // Idle
-        uint64_t idle_end = micros_64();
-
-        idle_time_us += subtract_64(idle_end, idle_start);
-
-        uint64_t now = micros_64();
-        total_time_us += subtract_64(now, last_time);
-        last_time = now;
-
-        if (total_time_us >= MICROS_S) {
-            float usage = 100.0f * (1.0f - ((float)idle_time_us / total_time_us));
-            UARTResponseAccumulator responses(&huart2);
-            responses.append("FOC CPU usage: %.2f%%\n", usage);
-            idle_time_us = 0;
-            total_time_us = 0;
-        }
-    }
-    #else
     while(true) {}
-    #endif
 }
 
 #ifndef NO_CYPHAL
 #pragma region Cyphal
+#ifdef LCM
 TYPE_ALIAS(FloatArray, uavcan_primitive_array_Real32_1_0)
 TYPE_ALIAS(EmptyMsg, uavcan_primitive_Empty_1_0)
 static constexpr CanardPortID LCM_RX_PORT = 1100;
 static constexpr CanardPortID LCM_TX_PORT = 1101;
+static constexpr CanardPortID LCM_REQUEST_PORT = 900;
 
 void in_loop_reporting(millis current_t) {
     static millis report_time = 0;
     EACH_N(current_t, report_time, 1, {
-        FloatArray::Type report_msg = {};
-        report_msg.value.count = 8;
-        report_msg.value.elements[0] = -motor->get_angle();
-        report_msg.value.elements[1] = 0.0f;
-        report_msg.value.elements[2] = -motor->get_velocity();
-        report_msg.value.elements[3] = 0.0f;
-        report_msg.value.elements[4] = -motor->get_torque();
-        report_msg.value.elements[5] = 0.0f;
-        report_msg.value.elements[6] = 10.0f;
-        report_msg.value.elements[7] = 800.0f;
         static CanardTransferID report_msg_transfer_id = 0;
-        get_interface()->send_msg<FloatArray>(&report_msg, LCM_RX_PORT, &report_msg_transfer_id);
+        FloatArray::Type report_msg = {};
+
+        report_msg.value.count = 7;
+        report_msg.value.elements[0] = motor->get_angle();
+        report_msg.value.elements[1] = motor->get_velocity();
+        report_msg.value.elements[2] = motor->get_torque();
+        report_msg.value.elements[3] = 0.0f;
+        report_msg.value.elements[4] = 0.0;
+        report_msg.value.elements[5] = 0.0f;
+        report_msg.value.elements[6] = 0.0f;
+
+        get_interface()->send_msg<FloatArray>(&report_msg, LCM_TX_PORT, &report_msg_transfer_id);
     })
 }
 
 
 class LCMCommandSub: public AbstractSubscription<FloatArray> {
 public:
-    LCMCommandSub(InterfacePtr interface, CanardPortID port_id): AbstractSubscription<FloatArray>(interface, port_id) {};
+    LCMCommandSub(InterfacePtr interface): AbstractSubscription<FloatArray>(interface, LCM_RX_PORT) {};
     void handler(const FloatArray::Type& msg, CanardRxTransfer*) override {
-        if (msg.value.count < 7) {
-            return;
-        }
-
         motor->set_foc_point(FOCTarget{
-            .torque = -msg.value.elements[2],
-            .angle = -msg.value.elements[0],
-            .velocity = -msg.value.elements[1],
-            .angle_kp = -msg.value.elements[4],
-            .velocity_kp = -msg.value.elements[5]
+            .torque = msg.value.elements[4],
+            .angle = msg.value.elements[0],
+            .velocity = msg.value.elements[2],
+            .angle_kp = msg.value.elements[1],
+            .velocity_kp = msg.value.elements[3]
         });
     }
 };
 
+/*
+class LCMRequestSub: public AbstractSubscription<EmptyMsg> {
+protected:
+    CanardTransferID report_msg_transfer_id = 0;
+public:
+    LCMRequestSub(InterfacePtr interface)
+        : AbstractSubscription<EmptyMsg>(interface, LCM_REQUEST_PORT, CanardTransferKindMessage)
+        {};
+    void handler(const EmptyMsg::Type& msg, CanardRxTransfer*) override {
+        FloatArray::Type report_msg = {};
+        report_msg.value.count = 7;
+        report_msg.value.elements[0] = motor->get_angle();
+        report_msg.value.elements[1] = motor->get_velocity();
+        report_msg.value.elements[2] = motor->get_torque();
+        report_msg.value.elements[3] = 0.0f;
+        report_msg.value.elements[4] = 0.0;
+        report_msg.value.elements[5] = 0.0f;
+        report_msg.value.elements[6] = 0.0f;
+        get_interface()->send_msg<FloatArray>(&report_msg, LCM_TX_PORT, &report_msg_transfer_id);
+    }
+};
+*/
+
 
 ReservedObject<LCMCommandSub> lcm_command_sub;
+//ReservedObject<LCMRequestSub> lcm_request_sub;
+
 
 void setup_subscriptions() {
     HAL_FDCAN_ConfigGlobalFilter(
         &hfdcan1,
-        FDCAN_REJECT,
-        FDCAN_REJECT,
-        FDCAN_REJECT_REMOTE,
-        FDCAN_REJECT_REMOTE
+        FDCAN_ACCEPT_IN_RX_FIFO0,
+        FDCAN_ACCEPT_IN_RX_FIFO0,
+        FDCAN_FILTER_REMOTE,
+        FDCAN_FILTER_REMOTE
     );
 
     auto cyphal_interface = get_interface();
-    const auto node_id = get_app_config().get_node_id();
 
-    lcm_command_sub.create(cyphal_interface, LCM_TX_PORT);
-
-    static FDCAN_FilterTypeDef sFilterConfig;
-    uint32_t filter_index = 0;
-    HAL_IMPORTANT(apply_filter(
-        filter_index,
-        &hfdcan1,
-        &sFilterConfig,
-        lcm_command_sub->make_filter(node_id)
-    ))
+    lcm_command_sub.create(cyphal_interface);
+    //lcm_request_sub.create(cyphal_interface);
 }
+#endif
 #pragma endregion
 #endif
