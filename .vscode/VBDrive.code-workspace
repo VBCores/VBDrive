@@ -105,6 +105,6 @@
 			"__node_handle": "cpp"
 		},
 		"cortex-debug.variableUseNaturalFormat": true,
-		"workbench.colorTheme": "Nord"
+		"workbench.colorTheme": "Cursor Light"
 	}
 }

@@ -8,33 +8,11 @@
 #include <voltbro/motors/bldc/vbdrive/vbdrive.hpp>
 #include <voltbro/config/serial/serial.h>
 
-// communications.cpp
-inline constexpr size_t CYPHAL_QUEUE_SIZE = 50;
-inline constexpr millis DELAY_ON_ERROR_MS = 500;
-std::shared_ptr<CyphalInterface> get_interface();
-void in_loop_reporting(millis);
-void setup_subscriptions();
-void cyphal_loop();
-void start_cyphal();
-void set_cyphal_mode(uint8_t mode);
-
-// common.cpp
-micros micros_64();
-millis millis_32();
-void start_timers();
-
-// app.cpp
-std::shared_ptr<VBDrive> get_motor();
-EEPROM& get_eeprom();
-
-//fdcan.cpp
-extern FDCAN_HandleTypeDef hfdcan1;
-
-// config.cpp
 struct VBDriveConfig: public BaseConfigData {
-    static constexpr uint32_t TYPE_ID = 0x55CCCFFF;
-    uint8_t gear_ratio;
+    static constexpr uint32_t TYPE_ID = 0x55CCCBBB;
+    uint8_t gear_ratio = 0;
     // NAN means not set
+    float max_voltage = NAN;
     float max_current = NAN;
     float max_torque = NAN;
     float max_speed = NAN;
@@ -62,7 +40,35 @@ struct VBDriveConfig: public BaseConfigData {
     void get(const std::string& param, UARTResponseAccumulator& responses);
     bool set(const std::string& param, std::string& value, UARTResponseAccumulator& responses);
 };
-using AppConfigT = AppConfigurator<VBDriveConfig, sizeof(CalibrationData) + 1>;
+
+constexpr size_t CALIBRATION_PLACEMENT = 0;
+constexpr size_t CONFIG_PLACEMENT = CALIBRATION_PLACEMENT + sizeof(CalibrationData) + 1;
+constexpr size_t IND_SENSOR_STATE_PLACEMENT = CONFIG_PLACEMENT + sizeof(VBDriveConfig) + 1;
+
+// communications.cpp
+inline constexpr size_t CYPHAL_QUEUE_SIZE = 50;
+inline constexpr millis DELAY_ON_ERROR_MS = 500;
+std::shared_ptr<CyphalInterface> get_interface();
+void in_loop_reporting(millis);
+void setup_subscriptions();
+void cyphal_loop();
+void start_cyphal();
+void set_cyphal_mode(uint8_t mode);
+
+// common.cpp
+micros micros_64();
+millis millis_32();
+void start_timers();
+
+// app.cpp
+std::shared_ptr<VBDrive> get_motor();
+EEPROM& get_eeprom();
+
+//fdcan.cpp
+extern FDCAN_HandleTypeDef hfdcan1;
+
+// config.cpp
+using AppConfigT = AppConfigurator<VBDriveConfig, CONFIG_PLACEMENT>;
 AppConfigT& get_app_config();
 void configure_fdcan(FDCAN_HandleTypeDef*);
 

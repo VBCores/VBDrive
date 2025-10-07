@@ -24,7 +24,7 @@ static volatile float debug_angle = 0.0f;
 static volatile float debug_velocity = 0.0f;
 static volatile float debug_angle_kp = 0.0f;
 static volatile float debug_velocity_kp = 0.0f;
-static volatile float debug_voltage = -1.0f;
+static volatile float debug_voltage = -21.0f;
 static volatile float debug_dt = 0.0f;
 #endif
 
@@ -74,10 +74,10 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
         value_stator_temp = inverter.get_stator_temperature();
         value_mcu_temp = inverter.get_mcu_temperature();
 
-        if (debug_voltage >= 0.0f) {
+        if (debug_voltage > -10.0f) {
             motor->set_voltage_point(debug_voltage);
         }
-        else if (debug_voltage < -10.0f){
+        else if (debug_voltage > -20.0f){
             motor->set_foc_point(FOCTarget{
                 .torque = debug_torque,
                 .angle = debug_angle,
