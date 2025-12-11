@@ -51,6 +51,12 @@ EEPROM& get_eeprom() {
 
 // correct is_inverted and elec_offset values will be set by apply_calibration
 AS5047P motor_encoder(GpioPin(SPI1_CS0_GPIO_Port, SPI1_CS0_Pin), &hspi1);
+InductiveSensor inductive_sensor(
+    eeprom,
+    IND_SENSOR_STATE_PLACEMENT,
+    &hspi3,
+    GpioPin(SPI3_CS_GPIO_Port, SPI3_CS_Pin)
+);
 VBInverter motor_inverter(&hadc1, &hadc2);
 
 std::shared_ptr<VBDrive> motor;
@@ -61,42 +67,37 @@ std::shared_ptr<VBDrive> get_motor() {
 void create_motor(VBDriveConfig& config_data) {
     // hardware limit
     const float MAX_VOLTAGE = 50.0f;
-
     // user-defined limit, can be superseded by motor parameters (stall, etc.)
     const float MAX_USER_CURRENT = value_or_default(config_data.max_current, 10.0f);
 
     motor = std::make_shared<VBDrive>(
-        0.00005f,
+        0.000069f,
         // Kalman filter for determining electric angle
         KalmanConfig {
             .expected_a = value_or_default(config_data.filter_a, 0.0f),
-            .g1 = value_or_default(config_data.filter_g1, 0.06598266439978051f),
-            .g2 = value_or_default(config_data.filter_g1, 37.30880268409287f),
-            .g3 = value_or_default(config_data.filter_g1, 8738.342694769584f),
-        },
-        // Control regulator for dedicated control (velocity and position)
-        PIDConfig {
-            .multiplier = 1.0f,
-            .kp = value_or_default(config_data.kp, 0.0f),
-            .ki = value_or_default(config_data.ki, 0.0f),
-            .kd = value_or_default(config_data.kd, 0.0f),
-            .integral_error_lim = MAX_USER_CURRENT,
-            .max_output = MAX_USER_CURRENT,
-            .min_output = -MAX_USER_CURRENT,
+            .g1 = 0.031f,
+            .g2 = 7.788f,
+            .g3 = 768.99f,
         },
         // Q Regulator
         PIDConfig {
             .multiplier = 1.0f,
-            .kp = 10.0f,
-            .ki = 800.0f,
+            .kp = value_or_default(config_data.kp, 16.0f),
+            .ki = value_or_default(config_data.ki, 0.06f),
+            .kd = value_or_default(config_data.kd, 0.0f),
             .integral_error_lim = MAX_VOLTAGE,
+            .max_output = MAX_USER_CURRENT,
+            .min_output = -MAX_USER_CURRENT,
         },
         // D Regulator
         PIDConfig {
             .multiplier = 1.0f,
-            .kp = 10.0f,
-            .ki = 800.0f,
+            .kp = value_or_default(config_data.kp, 16.0f),
+            .ki = value_or_default(config_data.ki, 0.06f),
+            .kd = value_or_default(config_data.kd, 0.0f),
             .integral_error_lim = MAX_VOLTAGE,
+            .max_output = MAX_USER_CURRENT,
+            .min_output = -MAX_USER_CURRENT,
         },
         // User-defined limits
         DriveLimits {
@@ -129,8 +130,7 @@ void create_motor(VBDriveConfig& config_data) {
         &htim1,
         motor_encoder,
         motor_inverter,
-        &hspi3,
-        GpioPin(SPI3_CS_GPIO_Port, SPI3_CS_Pin)
+        inductive_sensor
     );
     HAL_Delay(100);
     motor->init();
@@ -138,12 +138,12 @@ void create_motor(VBDriveConfig& config_data) {
 
 void apply_calibration() {
     CalibrationData calibration_data;
-    HAL_IMPORTANT(eeprom.read<CalibrationData>(&calibration_data, 0))
+    HAL_IMPORTANT(eeprom.read<CalibrationData>(&calibration_data, CALIBRATION_PLACEMENT))
     if (calibration_data.type_id != CalibrationData::TYPE_ID || !calibration_data.was_calibrated) {
         calibration_data.reset();
         motor->calibrate(calibration_data);
         calibration_data.was_calibrated = true;
-        HAL_IMPORTANT(eeprom.write<CalibrationData>(&calibration_data, 0))
+        HAL_IMPORTANT(eeprom.write<CalibrationData>(&calibration_data, CALIBRATION_PLACEMENT))
     }
     motor->apply_calibration(calibration_data);
 }
@@ -218,8 +218,18 @@ public:
             .angle_kp = msg.value.elements[1],
             .velocity_kp = msg.value.elements[3]
         });
+        motor->set_current_regulator_params(PIDConfig{
+            .multiplier = 1.0f,
+            .kp = msg.value.elements[6],
+            .ki = msg.value.elements[7],
+            .kd = 0.0f,
+            .integral_error_lim = 20.0f,
+            .max_output = 20.0f,
+            .min_output = -20.0f,
+        });
     }
 };
+
 
 /*
 class LCMRequestSub: public AbstractSubscription<EmptyMsg> {

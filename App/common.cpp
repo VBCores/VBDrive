@@ -25,6 +25,8 @@ static volatile float debug_velocity = 0.0f;
 static volatile float debug_angle_kp = 0.0f;
 static volatile float debug_velocity_kp = 0.0f;
 static volatile float debug_voltage = -21.0f;
+static volatile float debug_I_kp = 16.0f;
+static volatile float debug_I_ki = 0.6f;
 static volatile float debug_dt = 0.0f;
 #endif
 
@@ -45,8 +47,9 @@ inline void main_callback() {
     last_call = now;
 
     if (app_config.is_app_running()) {
-        static millis last_cyphal_call = 0;
-        EACH_N(millis_k, last_cyphal_call, 2, {
+        static micros last_cyphal_call = 0;
+        micros current_micros = micros_64();
+        EACH_N_MICROS(current_micros, last_cyphal_call, 50, {
             cyphal_loop();
         })
         get_motor()->update_with_dt(dt);
@@ -84,6 +87,15 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
                 .velocity = debug_velocity,
                 .angle_kp = debug_angle_kp,
                 .velocity_kp = debug_velocity_kp,
+            });
+            motor->set_current_regulator_params(PIDConfig{
+                .multiplier = 1.0f,
+                .kp = debug_I_kp,
+                .ki = debug_I_ki,
+                .kd = 0.0f,
+                .integral_error_lim = 50.0f,
+                .max_output = 10.0f,
+                .min_output = -10.0f,
             });
         }
         #endif

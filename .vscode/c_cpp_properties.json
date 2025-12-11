@@ -1,7 +1,7 @@
 {
 	"configurations": [
         {
-            "name": "CMake",
+            "name": "Main Configuration",
             "compileCommands": "${workspaceFolder}/compile_commands.json",
             "configurationProvider": "ms-vscode.cmake-tools",
             "defines": [
