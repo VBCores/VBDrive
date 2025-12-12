@@ -1,6 +1,8 @@
 #include "app.h"
 
+#include "stm32g4xx_hal_tim.h"
 #include "tim.h"
+#include "voltbro/utils.hpp"
 
 // Volatile is absolutely required here due to timer interrupt
 // Otherwise HAL_Delay() will not work
@@ -28,7 +30,7 @@ static volatile float debug_I_kp = 16.0f;
 static volatile float debug_I_ki = 0.6f;
 #endif
 #if defined(FOC_PROFILE) || defined(MONITOR)
-static volatile float value_dt = 0.0f;
+volatile float value_dt = 0.0f;
 #endif
 
 #ifdef FOC_PROFILE
@@ -41,7 +43,8 @@ static inline void init_dwt() {
     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
     dwt_ready = true;
 }
-static volatile uint32_t last_cycle_cost = 0;
+volatile uint32_t last_cycle_cost = 0;
+volatile uint32_t value_invocations = 0;
 #endif
 
 __attribute__((hot, flatten)) void main_callback() {
@@ -77,18 +80,19 @@ __attribute__((hot, flatten)) void main_callback() {
     }
     #ifdef FOC_PROFILE
     last_cycle_cost = DWT->CYCCNT - start_cycles;
+    value_invocations += 1;
     #if !defined(ENABLE_DT) && defined(MONITOR)
     value_dt = last_cycle_cost;
     #endif
     #endif
 
-    if (TIM4->SR & TIM_SR_UIF) {
+    /*if (TIM4->SR & TIM_SR_UIF) {
         TIM4->SR &= ~TIM_SR_UIF;
-    }
+    }*/
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
-    if (htim->Instance == TIM6) {
+    if (htim->Instance == TIM7) {
         millis_k += 1;
     } else if (htim->Instance == TIM2) {
         HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
@@ -136,12 +140,12 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 }
 
 micros __attribute__((optimize("O0"))) micros_64() {
-    return ((micros)millis_k * 1000u) + __HAL_TIM_GetCounter(&htim6);
+    return ((micros)millis_k * 1000u) + __HAL_TIM_GetCounter(&htim7);
 }
 
 void start_timers() {
     HAL_TIM_Base_Start_IT(&htim2);
-    HAL_TIM_Base_Start_IT(&htim6);
+    HAL_TIM_Base_Start_IT(&htim7);
 }
 
 millis millis_32() {

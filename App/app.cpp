@@ -68,9 +68,11 @@ VBDrive* get_motor() {
 
 void create_motor(VBDriveConfig& config_data) {
     // hardware limit
-    const float MAX_VOLTAGE = 50.0f;
+    constexpr float MAX_VOLTAGE = 50.0f;
     // user-defined limit, can be superseded by motor parameters (stall, etc.)
     const float MAX_USER_CURRENT = value_or_default(config_data.max_current, 10.0f);
+    constexpr float DEFAULT_I_KP = 6.0;
+    constexpr float DEFAULT_I_KI = 2.0;
 
     motor = new (&motor_storage) VBDrive(
         0.000069f,
@@ -84,8 +86,8 @@ void create_motor(VBDriveConfig& config_data) {
         // Q Regulator
         PIDConfig {
             .multiplier = 1.0f,
-            .kp = value_or_default(config_data.kp, 4.0f),
-            .ki = value_or_default(config_data.ki, 4.0f),
+            .kp = value_or_default(config_data.kp, DEFAULT_I_KP),
+            .ki = value_or_default(config_data.ki, DEFAULT_I_KI),
             .kd = value_or_default(config_data.kd, 0.0f),
             .integral_error_lim = MAX_VOLTAGE,
             .max_output = MAX_USER_CURRENT,
@@ -94,8 +96,8 @@ void create_motor(VBDriveConfig& config_data) {
         // D Regulator
         PIDConfig {
             .multiplier = 1.0f,
-            .kp = value_or_default(config_data.kp, 4.0f),
-            .ki = value_or_default(config_data.ki, 4.0f),
+            .kp = value_or_default(config_data.kp, DEFAULT_I_KP),
+            .ki = value_or_default(config_data.ki, DEFAULT_I_KI),
             .kd = value_or_default(config_data.kd, 0.0f),
             .integral_error_lim = MAX_VOLTAGE,
             .max_output = MAX_USER_CURRENT,
@@ -181,9 +183,9 @@ void apply_calibration() {
     motor->set_foc_point(FOCTarget{
         .torque = 0,
         .angle = 0,
-        .velocity = 1,
+        .velocity = 2,
         .angle_kp = 0,
-        .velocity_kp = 0.3
+        .velocity_kp = 0.5
     });
     #endif
 

@@ -11,8 +11,6 @@ endif()
 
 set(CMAKE_PROJECT_NAME VBDrive)
 
-include("cmake/gcc-arm-none-eabi.cmake")
-
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 
 enable_language(C ASM)
@@ -71,8 +69,8 @@ add_compile_options(
 )
 
 target_compile_definitions(${CMAKE_PROJECT_NAME} PUBLIC
-    $<$<CONFIG:RelWithDebInfo>: -DMONITOR -DFOC_PROFILE>
-    $<$<CONFIG:Debug>: -DMONITOR -DDEBUG>
+    $<$<CONFIG:RelWithDebInfo>:  -DFOC_PROFILE>
+    $<$<CONFIG:Debug>: -DMONITOR -DDEBUG -DFOC_PROFILE>
 )
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
     $<$<CONFIG:Release>: -O3 -flto -fno-math-errno -fno-signaling-nans -fomit-frame-pointer>
