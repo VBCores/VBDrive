@@ -61,7 +61,7 @@ millis millis_32();
 void start_timers();
 
 // app.cpp
-std::shared_ptr<VBDrive> get_motor();
+VBDrive* get_motor();
 EEPROM& get_eeprom();
 
 //fdcan.cpp

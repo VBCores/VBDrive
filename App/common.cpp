@@ -18,7 +18,6 @@ static volatile float value_angle = 0;
 static volatile float value_velocity = 0;
 static volatile float value_torque = 0;
 
-
 static volatile float debug_torque = 0.0f;
 static volatile float debug_angle = 0.0f;
 static volatile float debug_velocity = 0.0f;
@@ -27,33 +26,61 @@ static volatile float debug_velocity_kp = 0.0f;
 static volatile float debug_voltage = -21.0f;
 static volatile float debug_I_kp = 16.0f;
 static volatile float debug_I_ki = 0.6f;
-static volatile float debug_dt = 0.0f;
+#endif
+#if defined(FOC_PROFILE) || defined(MONITOR)
+static volatile float value_dt = 0.0f;
 #endif
 
-inline void main_callback() {
+#ifdef FOC_PROFILE
+static bool dwt_ready = false;
+static inline void init_dwt() {
+    if ((CoreDebug->DEMCR & CoreDebug_DEMCR_TRCENA_Msk) == 0) {
+        CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    }
+    DWT->CYCCNT = 0;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    dwt_ready = true;
+}
+static volatile uint32_t last_cycle_cost = 0;
+#endif
+
+__attribute__((hot, flatten)) void main_callback() {
     auto& app_config = get_app_config();
 
+    #ifdef ENABLE_DT
     // it can never start at 0t, so 0 is "not set" value
     static micros last_call = 0;
     float dt = 0;
     micros now = micros_64();
+    #endif
+    #ifdef FOC_PROFILE
+    if (!dwt_ready) {
+        init_dwt();
+    }
+    const uint32_t start_cycles = DWT->CYCCNT;
+    #endif
+    #ifdef ENABLE_DT
     if (last_call != 0) {
         micros diff = subtract_64(now, last_call);
         dt = (float)diff / (float)MICROS_S;
         #ifdef MONITOR
-        debug_dt = dt;
+        value_dt = dt;
         #endif
     }
     last_call = now;
+    #endif
 
     if (app_config.is_app_running()) {
-        static micros last_cyphal_call = 0;
-        micros current_micros = micros_64();
-        EACH_N_MICROS(current_micros, last_cyphal_call, 50, {
-            cyphal_loop();
-        })
-        get_motor()->update_with_dt(dt);
+        if (auto motor = get_motor()) {
+            motor->update();
+        }
     }
+    #ifdef FOC_PROFILE
+    last_cycle_cost = DWT->CYCCNT - start_cycles;
+    #if !defined(ENABLE_DT) && defined(MONITOR)
+    value_dt = last_cycle_cost;
+    #endif
+    #endif
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {

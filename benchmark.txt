@@ -1,0 +1,9 @@
+120s
+
+Inlines, no optim:          6600
+Inlines, full optim:        6380
+No inlines, optim:          6380
+Inline and optim on update: 6360
+Everything:                 6500
+
+BEST CHOICE: inline, no arbitrary hot and flatten, but mark main loop for optim

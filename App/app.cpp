@@ -2,6 +2,7 @@
 #include "app.h"
 
 #include <memory>
+#include <type_traits>
 
 #include "tim.h"
 #include "i2c.h"
@@ -58,9 +59,10 @@ InductiveSensor inductive_sensor(
     GpioPin(SPI3_CS_GPIO_Port, SPI3_CS_Pin)
 );
 VBInverter motor_inverter(&hadc1, &hadc2);
-
-std::shared_ptr<VBDrive> motor;
-std::shared_ptr<VBDrive> get_motor() {
+// Static storage to avoid heap usage in the hot path.
+static std::aligned_storage_t<sizeof(VBDrive), alignof(VBDrive)> motor_storage;
+static VBDrive* motor = nullptr;
+VBDrive* get_motor() {
     return motor;
 }
 
@@ -70,7 +72,7 @@ void create_motor(VBDriveConfig& config_data) {
     // user-defined limit, can be superseded by motor parameters (stall, etc.)
     const float MAX_USER_CURRENT = value_or_default(config_data.max_current, 10.0f);
 
-    motor = std::make_shared<VBDrive>(
+    motor = new (&motor_storage) VBDrive(
         0.000069f,
         // Kalman filter for determining electric angle
         KalmanConfig {
@@ -82,8 +84,8 @@ void create_motor(VBDriveConfig& config_data) {
         // Q Regulator
         PIDConfig {
             .multiplier = 1.0f,
-            .kp = value_or_default(config_data.kp, 16.0f),
-            .ki = value_or_default(config_data.ki, 0.06f),
+            .kp = value_or_default(config_data.kp, 4.0f),
+            .ki = value_or_default(config_data.ki, 4.0f),
             .kd = value_or_default(config_data.kd, 0.0f),
             .integral_error_lim = MAX_VOLTAGE,
             .max_output = MAX_USER_CURRENT,
@@ -92,8 +94,8 @@ void create_motor(VBDriveConfig& config_data) {
         // D Regulator
         PIDConfig {
             .multiplier = 1.0f,
-            .kp = value_or_default(config_data.kp, 16.0f),
-            .ki = value_or_default(config_data.ki, 0.06f),
+            .kp = value_or_default(config_data.kp, 4.0f),
+            .ki = value_or_default(config_data.ki, 4.0f),
             .kd = value_or_default(config_data.kd, 0.0f),
             .integral_error_lim = MAX_VOLTAGE,
             .max_output = MAX_USER_CURRENT,
@@ -175,7 +177,19 @@ void apply_calibration() {
     // separate 20KHz control timer (tim1 is 80KHz, CPU not catching up)
     HAL_TIM_Base_Start_IT(&htim4);
 
-    while(true) {}
+    #ifdef FOC_PROFILE
+    motor->set_foc_point(FOCTarget{
+        .torque = 0,
+        .angle = 0,
+        .velocity = 1,
+        .angle_kp = 0,
+        .velocity_kp = 0.3
+    });
+    #endif
+
+    while(true) {
+        cyphal_loop();
+    }
 }
 
 #ifndef NO_CYPHAL

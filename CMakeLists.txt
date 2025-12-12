@@ -57,23 +57,6 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Drivers/cyphal_types
 )
 
-if(CMAKE_BUILD_TYPE MATCHES RelWithDebInfo)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -g3")
-    target_compile_definitions(${CMAKE_PROJECT_NAME} PUBLIC
-        -DMONITOR
-    )
-endif()
-if(CMAKE_BUILD_TYPE MATCHES Release)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -g1")
-endif()
-if(CMAKE_BUILD_TYPE MATCHES Debug)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Og -g3")
-    target_compile_definitions(${CMAKE_PROJECT_NAME} PUBLIC
-        -DDEBUG
-        -DMONITOR
-    )
-endif()
-
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     -DLCM
     -DUSE_HAL_DRIVER
@@ -86,6 +69,25 @@ add_compile_options(
     -mfloat-abi=hard   # Use hardware FPU
     -mfpu=fpv4-sp-d16  # For Cortex-M4
 )
+
+target_compile_definitions(${CMAKE_PROJECT_NAME} PUBLIC
+    $<$<CONFIG:RelWithDebInfo>: -DMONITOR -DFOC_PROFILE>
+    $<$<CONFIG:Debug>: -DMONITOR -DDEBUG>
+)
+target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
+    $<$<CONFIG:Release>: -O3 -flto -fno-math-errno -fno-signaling-nans -fomit-frame-pointer>
+    $<$<CONFIG:RelWithDebInfo>: -O3 -g2 -flto -fno-math-errno -fno-signaling-nans>
+    $<$<CONFIG:Debug>: -Og -g3>
+)
+
+if (NOT CMAKE_BUILD_TYPE MATCHES Debug)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()
+target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
+    $<$<CONFIG:Release>:-flto>
+    $<$<CONFIG:RelWithDebInfo>:-flto>
+)
+
 set(
     CMAKE_EXE_LINKER_FLAGS
     "${CMAKE_EXE_LINKER_FLAGS} -mfloat-abi=hard -mfpu=fpv4-sp-d16 -u _printf_float"
