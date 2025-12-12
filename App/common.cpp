@@ -81,6 +81,10 @@ __attribute__((hot, flatten)) void main_callback() {
     value_dt = last_cycle_cost;
     #endif
     #endif
+
+    if (TIM4->SR & TIM_SR_UIF) {
+        TIM4->SR &= ~TIM_SR_UIF;
+    }
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
