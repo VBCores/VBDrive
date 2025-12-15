@@ -69,7 +69,7 @@ add_compile_options(
 )
 
 target_compile_definitions(${CMAKE_PROJECT_NAME} PUBLIC
-    $<$<CONFIG:RelWithDebInfo>:  -DFOC_PROFILE>
+    $<$<CONFIG:RelWithDebInfo>: -DMONITOR -DFOC_PROFILE>
     $<$<CONFIG:Debug>: -DMONITOR -DDEBUG -DFOC_PROFILE>
 )
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE

@@ -71,11 +71,11 @@ void create_motor(VBDriveConfig& config_data) {
     constexpr float MAX_VOLTAGE = 50.0f;
     // user-defined limit, can be superseded by motor parameters (stall, etc.)
     const float MAX_USER_CURRENT = value_or_default(config_data.max_current, 10.0f);
-    constexpr float DEFAULT_I_KP = 6.0;
-    constexpr float DEFAULT_I_KI = 2.0;
+    constexpr float DEFAULT_I_KP = 3.0;
+    constexpr float DEFAULT_I_KI = 3.0;
 
     motor = new (&motor_storage) VBDrive(
-        0.000069f,
+        0.000025f,
         // Kalman filter for determining electric angle
         KalmanConfig {
             .expected_a = value_or_default(config_data.filter_a, 0.0f),
@@ -185,7 +185,7 @@ void apply_calibration() {
         .angle = 0,
         .velocity = 2,
         .angle_kp = 0,
-        .velocity_kp = 0.5
+        .velocity_kp = 1.5
     });
     #endif
 

@@ -10,24 +10,24 @@ static volatile uint32_t millis_k __attribute__ ((__aligned__(4))) = 0;
 
 #ifdef MONITOR
 static volatile encoder_data value_enc = 0;
-static volatile float value_A = 0;
-static volatile float value_B = 0;
-static volatile float value_C = 0;
-static volatile float value_V = 0;
-static volatile float value_stator_temp = 0;
-static volatile float value_mcu_temp = 0;
-static volatile float value_angle = 0;
-static volatile float value_velocity = 0;
-static volatile float value_torque = 0;
+volatile float value_A = 0;
+volatile float value_B = 0;
+volatile float value_C = 0;
+volatile float value_V = 0;
+volatile float value_stator_temp = 0;
+volatile float value_mcu_temp = 0;
+volatile float value_angle = 0;
+volatile float value_velocity = 0;
+volatile float value_torque = 0;
 
-static volatile float debug_torque = 0.0f;
-static volatile float debug_angle = 0.0f;
-static volatile float debug_velocity = 0.0f;
-static volatile float debug_angle_kp = 0.0f;
-static volatile float debug_velocity_kp = 0.0f;
-static volatile float debug_voltage = -21.0f;
-static volatile float debug_I_kp = 16.0f;
-static volatile float debug_I_ki = 0.6f;
+volatile float debug_torque = 0.0f;
+volatile float debug_angle = 0.0f;
+volatile float debug_velocity = 0.0f;
+volatile float debug_angle_kp = 0.0f;
+volatile float debug_velocity_kp = 0.0f;
+volatile float debug_voltage = -21.0f;
+volatile float debug_I_kp = 16.0f;
+volatile float debug_I_ki = 0.6f;
 #endif
 #if defined(FOC_PROFILE) || defined(MONITOR)
 volatile float value_dt = 0.0f;
