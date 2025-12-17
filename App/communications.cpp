@@ -74,7 +74,7 @@ void heartbeat() {
     }
 }
 
-__attribute__((hot)) void cyphal_loop() {
+__attribute__((hot, flatten)) void cyphal_loop() {
     if (_is_cyphal_on) {
         cyphal_interface->loop();
     }

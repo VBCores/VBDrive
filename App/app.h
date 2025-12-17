@@ -56,6 +56,7 @@ void start_cyphal();
 void set_cyphal_mode(uint8_t mode);
 
 // common.cpp
+micros system_time();
 micros micros_64();
 millis millis_32();
 void start_timers();

@@ -25,6 +25,7 @@
 #include "uavcan/primitive/Empty_1_0.h"
 #include <voltbro/foc/command_1_0.h>
 #include <voltbro/foc/specific_control_1_0.h>
+#include <voltbro/foc/state_simple_1_0.h>
 
 #include <voltbro/eeprom/eeprom.hpp>
 #include <voltbro/encoders/ASxxxx/AS5047P.hpp>
@@ -67,21 +68,20 @@ VBDrive* get_motor() {
 }
 
 void create_motor(VBDriveConfig& config_data) {
-    // hardware limit
+    // hardware limit is 50V, 30A (?)
     constexpr float MAX_VOLTAGE = 50.0f;
-    // user-defined limit, can be superseded by motor parameters (stall, etc.)
-    const float MAX_USER_CURRENT = value_or_default(config_data.max_current, 10.0f);
-    constexpr float DEFAULT_I_KP = 3.0;
-    constexpr float DEFAULT_I_KI = 3.0;
+
+    constexpr float DEFAULT_I_KP = 5.0;
+    constexpr float DEFAULT_I_KI = 1300.0;
 
     motor = new (&motor_storage) VBDrive(
         0.000025f,
         // Kalman filter for determining electric angle
         KalmanConfig {
             .expected_a = value_or_default(config_data.filter_a, 0.0f),
-            .g1 = 0.031f,
-            .g2 = 7.788f,
-            .g3 = 768.99f,
+            .g1 = 0.015700989410003974f,
+            .g2 = 3.925227776360174f,
+            .g3 = 387.54711795263574f,
         },
         // Q Regulator
         PIDConfig {
@@ -90,8 +90,8 @@ void create_motor(VBDriveConfig& config_data) {
             .ki = value_or_default(config_data.ki, DEFAULT_I_KI),
             .kd = value_or_default(config_data.kd, 0.0f),
             .integral_error_lim = MAX_VOLTAGE,
-            .max_output = MAX_USER_CURRENT,
-            .min_output = -MAX_USER_CURRENT,
+            .max_output = MAX_VOLTAGE,
+            .min_output = -MAX_VOLTAGE,
         },
         // D Regulator
         PIDConfig {
@@ -100,12 +100,12 @@ void create_motor(VBDriveConfig& config_data) {
             .ki = value_or_default(config_data.ki, DEFAULT_I_KI),
             .kd = value_or_default(config_data.kd, 0.0f),
             .integral_error_lim = MAX_VOLTAGE,
-            .max_output = MAX_USER_CURRENT,
-            .min_output = -MAX_USER_CURRENT,
+            .max_output = MAX_VOLTAGE,
+            .min_output = -MAX_VOLTAGE,
         },
         // User-defined limits
         DriveLimits {
-            .user_current_limit = MAX_USER_CURRENT,
+            .user_current_limit = value_or_default(config_data.max_current, NAN),
             .user_torque_limit = value_or_default(config_data.max_torque, NAN),
             .user_speed_limit = value_or_default(config_data.max_speed, NAN),
             .user_position_lower_limit = value_or_default(config_data.min_angle, NAN),
@@ -114,7 +114,7 @@ void create_motor(VBDriveConfig& config_data) {
         // Built-in constant parameters
         DriveInfo {
             .torque_const = value_or_default(config_data.torque_const, 1.0f),
-            .max_current = 10.0f,
+            .max_current = 30.0,
             .max_torque = 100.0f,
             .stall_current = 6.0f,
             .stall_timeout = 3.0f,
@@ -176,18 +176,7 @@ void apply_calibration() {
 
     set_cyphal_mode(uavcan_node_Mode_1_0_OPERATIONAL);
 
-    // separate 20KHz control timer (tim1 is 80KHz, CPU not catching up)
     HAL_TIM_Base_Start_IT(&htim4);
-
-    #ifdef FOC_PROFILE
-    motor->set_foc_point(FOCTarget{
-        .torque = 0,
-        .angle = 0,
-        .velocity = 2,
-        .angle_kp = 0,
-        .velocity_kp = 1.5
-    });
-    #endif
 
     while(true) {
         cyphal_loop();
@@ -197,85 +186,68 @@ void apply_calibration() {
 #ifndef NO_CYPHAL
 #pragma region Cyphal
 #ifdef LCM
-TYPE_ALIAS(FloatArray, uavcan_primitive_array_Real32_1_0)
-TYPE_ALIAS(EmptyMsg, uavcan_primitive_Empty_1_0)
-static constexpr CanardPortID LCM_RX_PORT = 1100;
-static constexpr CanardPortID LCM_TX_PORT = 1101;
-static constexpr CanardPortID LCM_REQUEST_PORT = 900;
+#include "lcm.h"
+#else
+TYPE_ALIAS(FOCCommand, voltbro_foc_command_1_0)
+TYPE_ALIAS(FOCState, voltbro_foc_state_simple_1_0)
+TYPE_ALIAS(SpecificControl, voltbro_foc_specific_control_1_0)
+
+static constexpr CanardPortID FOC_COMMAND_PORT = 2107;
+static constexpr CanardPortID FOC_STATE_PORT = 3811;
+static constexpr CanardPortID SPECIFIC_CONTROL_PORT = 3407;
 
 void in_loop_reporting(millis current_t) {
     static millis report_time = 0;
     EACH_N(current_t, report_time, 1, {
-        static CanardTransferID report_msg_transfer_id = 0;
-        FloatArray::Type report_msg = {};
+        FOCState::Type state_msg = {};
 
-        report_msg.value.count = 7;
-        report_msg.value.elements[0] = motor->get_angle();
-        report_msg.value.elements[1] = motor->get_velocity();
-        report_msg.value.elements[2] = motor->get_torque();
-        report_msg.value.elements[3] = 0.0f;
-        report_msg.value.elements[4] = 0.0;
-        report_msg.value.elements[5] = 0.0f;
-        report_msg.value.elements[6] = 0.0f;
+        state_msg.timestamp.microsecond = system_time();
 
-        get_interface()->send_msg<FloatArray>(&report_msg, LCM_TX_PORT, &report_msg_transfer_id);
+        state_msg.angle.radian = motor->get_angle();
+        state_msg.velocity.radian_per_second = motor->get_velocity();
+        state_msg._torque.newton_meter = motor->get_torque();
+
+        state_msg.current.ampere = motor->get_working_current();
+        state_msg.bus_voltage.volt = motor_inverter.get_busV();
+
+        constexpr float KELVIN_OFFSET = 273.15f;
+        motor_inverter.update_temperature();
+        state_msg.mcu_temp.kelvin = motor_inverter.get_mcu_temperature() + KELVIN_OFFSET;
+        state_msg.stator_temp.kelvin = motor_inverter.get_stator_temperature() + KELVIN_OFFSET;
+
+        state_msg.has_fault.value = false; // TODO: fault check
+
+        static CanardTransferID state_transfer_id = 0;
+        get_interface()->send_msg<FOCState>(&state_msg, FOC_STATE_PORT, &state_transfer_id);
     })
 }
 
-
-class LCMCommandSub: public AbstractSubscription<FloatArray> {
+class FOCCommandSub: public AbstractSubscription<FOCCommand> {
 public:
-    LCMCommandSub(InterfacePtr interface): AbstractSubscription<FloatArray>(interface, LCM_RX_PORT) {};
-    void handler(const FloatArray::Type& msg, CanardRxTransfer*) override {
-        motor->set_foc_point(FOCTarget{
-            .torque = msg.value.elements[4],
-            .angle = msg.value.elements[0],
-            .velocity = msg.value.elements[2],
-            .angle_kp = msg.value.elements[1],
-            .velocity_kp = msg.value.elements[3]
+    FOCCommandSub(InterfacePtr interface, CanardPortID port_id): AbstractSubscription<FOCCommand>(interface, port_id) {};
+    void handler(const FOCCommand::Type& msg, CanardRxTransfer* _) override {
+        motor->set_foc_point(FOCTarget {
+            .torque = msg._torque.newton_meter,
+            .angle = msg.angle.radian,
+            .velocity = msg.velocity.radian_per_second,
+            .angle_kp = msg.angle_kp.value,
+            .velocity_kp = msg.velocity_kp.value
         });
-        motor->set_current_regulator_params(PIDConfig{
-            .multiplier = 1.0f,
-            .kp = msg.value.elements[6],
-            .ki = msg.value.elements[7],
-            .kd = 0.0f,
-            .integral_error_lim = 20.0f,
-            .max_output = 20.0f,
-            .min_output = -20.0f,
-        });
+        motor->set_current_regulator_params(msg.I_kp.value, msg.I_ki.value);
     }
 };
 
-
-/*
-class LCMRequestSub: public AbstractSubscription<EmptyMsg> {
-protected:
-    CanardTransferID report_msg_transfer_id = 0;
-public:
-    LCMRequestSub(InterfacePtr interface)
-        : AbstractSubscription<EmptyMsg>(interface, LCM_REQUEST_PORT, CanardTransferKindMessage)
-        {};
-    void handler(const EmptyMsg::Type& msg, CanardRxTransfer*) override {
-        FloatArray::Type report_msg = {};
-        report_msg.value.count = 7;
-        report_msg.value.elements[0] = motor->get_angle();
-        report_msg.value.elements[1] = motor->get_velocity();
-        report_msg.value.elements[2] = motor->get_torque();
-        report_msg.value.elements[3] = 0.0f;
-        report_msg.value.elements[4] = 0.0;
-        report_msg.value.elements[5] = 0.0f;
-        report_msg.value.elements[6] = 0.0f;
-        get_interface()->send_msg<FloatArray>(&report_msg, LCM_TX_PORT, &report_msg_transfer_id);
-    }
-};
-*/
-
-
-ReservedObject<LCMCommandSub> lcm_command_sub;
-//ReservedObject<LCMRequestSub> lcm_request_sub;
-
+ReservedObject<NodeInfoReader> node_info_reader;
+ReservedObject<RegistersHandler<1>> registers_handler;
+// TODO: Specific control
+//ReservedObject<SpecificControlSub> specific_control_sub;
+ReservedObject<FOCCommandSub> foc_command_sub;
+#endif
 
 void setup_subscriptions() {
+    auto cyphal_interface = get_interface();
+
+#ifdef LCM
     HAL_FDCAN_ConfigGlobalFilter(
         &hfdcan1,
         FDCAN_ACCEPT_IN_RX_FIFO0,
@@ -283,12 +255,89 @@ void setup_subscriptions() {
         FDCAN_FILTER_REMOTE,
         FDCAN_FILTER_REMOTE
     );
-
-    auto cyphal_interface = get_interface();
-
     lcm_command_sub.create(cyphal_interface);
-    //lcm_request_sub.create(cyphal_interface);
-}
+#else
+    HAL_FDCAN_ConfigGlobalFilter(
+        &hfdcan1,
+        FDCAN_REJECT,
+        FDCAN_REJECT,
+        FDCAN_REJECT_REMOTE,
+        FDCAN_REJECT_REMOTE
+    );
+
+    const auto node_id = get_app_config().get_node_id();
+    registers_handler.create(
+        std::array<RegisterDefinition, 1>{{
+            {
+                "motor.is_on",
+                [](
+                    const uavcan_register_Value_1_0& v_in,
+                    uavcan_register_Value_1_0& v_out,
+                    RegisterAccessResponse::Type& response
+                ){
+                    static bool value = false;
+                    if (v_in._tag_ == 3) {
+                        value = v_in.bit.value.bitpacked[0] == 1;
+                    }
+                    else {
+                        // TODO: report error
+                    }
+
+                    motor->set_state(value);
+
+                    response.persistent = true;
+                    response._mutable = true;
+                    v_out._tag_ = 3;
+                    v_out.bit.value.bitpacked[0] = motor->is_on();
+                    v_out.bit.value.count = 1;
+                }
+            }
+        }},
+        cyphal_interface
+    );
+
+    node_info_reader.create(
+        cyphal_interface,
+        "org.voltbro.vbdrive",
+        uavcan_node_Version_1_0{1, 0},
+        uavcan_node_Version_1_0{1, 0},
+        uavcan_node_Version_1_0{1, 0},
+        0
+    );
+
+    // TODO: specific control
+    //specific_control_sub.create(cyphal_interface, SPECIFIC_CONTROL_PORT + node_id);
+    foc_command_sub.create(cyphal_interface, FOC_COMMAND_PORT + node_id);
+
+    HAL_IMPORTANT(apply_filter(
+        0,
+        &hfdcan1,
+        foc_command_sub->make_filter(node_id)
+    ))
+
+    HAL_IMPORTANT(apply_filter(
+        1,
+        &hfdcan1,
+        registers_handler->make_filter(node_id)
+    ))
+
+    HAL_IMPORTANT(apply_filter(
+        2,
+        &hfdcan1,
+        node_info_reader->make_filter(node_id)
+    ))
+
+    // TODO: Specific control
+    /*
+    filter_index += 1;
+    HAL_IMPORTANT(apply_filter(
+        filter_index,
+        &hfdcan1,
+        &sFilterConfig,
+        specific_control_sub->make_filter(node_id)
+    ))
+    */
 #endif
+}
 #pragma endregion
 #endif

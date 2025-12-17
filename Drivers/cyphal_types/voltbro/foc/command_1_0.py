@@ -3,7 +3,7 @@
 # Source file:
 # /Users/igor/Work/misc/cyphal_ws/types/voltbro/foc/command.1.0.dsdl
 #
-# Generated at:  2025-07-15 15:58:57.429324 UTC
+# Generated at:  2025-12-16 13:33:59.853525 UTC
 # Is deprecated: no
 # Fixed port ID: None
 # Full name:     voltbro.foc.command
@@ -50,7 +50,9 @@ class command_1_0:
                  angle:       None | uavcan.si.unit.angle.Scalar_1_0 = None,
                  velocity:    None | uavcan.si.unit.angular_velocity.Scalar_1_0 = None,
                  angle_kp:    None | uavcan.primitive.scalar.Real32_1_0 = None,
-                 velocity_kp: None | uavcan.primitive.scalar.Real32_1_0 = None) -> None:
+                 velocity_kp: None | uavcan.primitive.scalar.Real32_1_0 = None,
+                 I_kp:        None | uavcan.primitive.scalar.Real32_1_0 = None,
+                 I_ki:        None | uavcan.primitive.scalar.Real32_1_0 = None) -> None:
         """
         voltbro.foc.command.1.0
         Raises ValueError if any of the primitive values are outside the permitted range, regardless of the cast mode.
@@ -59,12 +61,16 @@ class command_1_0:
         :param velocity:    uavcan.si.unit.angular_velocity.Scalar.1.0 velocity
         :param angle_kp:    uavcan.primitive.scalar.Real32.1.0 angle_kp
         :param velocity_kp: uavcan.primitive.scalar.Real32.1.0 velocity_kp
+        :param I_kp:        uavcan.primitive.scalar.Real32.1.0 I_kp
+        :param I_ki:        uavcan.primitive.scalar.Real32.1.0 I_ki
         """
         self._torque:      uavcan.si.unit.torque.Scalar_1_0
         self._angle:       uavcan.si.unit.angle.Scalar_1_0
         self._velocity:    uavcan.si.unit.angular_velocity.Scalar_1_0
         self._angle_kp:    uavcan.primitive.scalar.Real32_1_0
         self._velocity_kp: uavcan.primitive.scalar.Real32_1_0
+        self._I_kp:        uavcan.primitive.scalar.Real32_1_0
+        self._I_ki:        uavcan.primitive.scalar.Real32_1_0
 
         if torque is None:
             self.torque = uavcan.si.unit.torque.Scalar_1_0()
@@ -105,6 +111,22 @@ class command_1_0:
         else:
             raise ValueError(f'velocity_kp: expected uavcan.primitive.scalar.Real32_1_0 '
                              f'got {type(velocity_kp).__name__}')
+
+        if I_kp is None:
+            self.I_kp = uavcan.primitive.scalar.Real32_1_0()
+        elif isinstance(I_kp, uavcan.primitive.scalar.Real32_1_0):
+            self.I_kp = I_kp
+        else:
+            raise ValueError(f'I_kp: expected uavcan.primitive.scalar.Real32_1_0 '
+                             f'got {type(I_kp).__name__}')
+
+        if I_ki is None:
+            self.I_ki = uavcan.primitive.scalar.Real32_1_0()
+        elif isinstance(I_ki, uavcan.primitive.scalar.Real32_1_0):
+            self.I_ki = I_ki
+        else:
+            raise ValueError(f'I_ki: expected uavcan.primitive.scalar.Real32_1_0 '
+                             f'got {type(I_ki).__name__}')
 
     @property
     def torque(self) -> uavcan.si.unit.torque.Scalar_1_0:
@@ -181,6 +203,36 @@ class command_1_0:
         else:
             raise ValueError(f'velocity_kp: expected uavcan.primitive.scalar.Real32_1_0 got {type(x).__name__}')
 
+    @property
+    def I_kp(self) -> uavcan.primitive.scalar.Real32_1_0:
+        """
+        uavcan.primitive.scalar.Real32.1.0 I_kp
+        The setter raises ValueError if the supplied value exceeds the valid range or otherwise inapplicable.
+        """
+        return self._I_kp
+
+    @I_kp.setter
+    def I_kp(self, x: uavcan.primitive.scalar.Real32_1_0) -> None:
+        if isinstance(x, uavcan.primitive.scalar.Real32_1_0):
+            self._I_kp = x
+        else:
+            raise ValueError(f'I_kp: expected uavcan.primitive.scalar.Real32_1_0 got {type(x).__name__}')
+
+    @property
+    def I_ki(self) -> uavcan.primitive.scalar.Real32_1_0:
+        """
+        uavcan.primitive.scalar.Real32.1.0 I_ki
+        The setter raises ValueError if the supplied value exceeds the valid range or otherwise inapplicable.
+        """
+        return self._I_ki
+
+    @I_ki.setter
+    def I_ki(self, x: uavcan.primitive.scalar.Real32_1_0) -> None:
+        if isinstance(x, uavcan.primitive.scalar.Real32_1_0):
+            self._I_ki = x
+        else:
+            raise ValueError(f'I_ki: expected uavcan.primitive.scalar.Real32_1_0 got {type(x).__name__}')
+
     # noinspection PyProtectedMember
     def _serialize_(self, _ser_: _Serializer_) -> None:
         assert _ser_.current_bit_length % 8 == 0, 'Serializer is not aligned'
@@ -201,7 +253,13 @@ class command_1_0:
         self.velocity_kp._serialize_(_ser_)
         assert _ser_.current_bit_length % 8 == 0, 'Nested object alignment error'
         _ser_.pad_to_alignment(8)
-        assert 160 <= (_ser_.current_bit_length - _base_offset_) <= 160, \
+        self.I_kp._serialize_(_ser_)
+        assert _ser_.current_bit_length % 8 == 0, 'Nested object alignment error'
+        _ser_.pad_to_alignment(8)
+        self.I_ki._serialize_(_ser_)
+        assert _ser_.current_bit_length % 8 == 0, 'Nested object alignment error'
+        _ser_.pad_to_alignment(8)
+        assert 224 <= (_ser_.current_bit_length - _base_offset_) <= 224, \
             'Bad serialization of voltbro.foc.command.1.0'
 
     # noinspection PyProtectedMember
@@ -229,14 +287,24 @@ class command_1_0:
         _des_.pad_to_alignment(8)
         _f4_ = uavcan.primitive.scalar.Real32_1_0._deserialize_(_des_)
         assert _des_.consumed_bit_length % 8 == 0, 'Nested object alignment error'
+        # Temporary _f5_ holds the value of "I_kp"
+        _des_.pad_to_alignment(8)
+        _f5_ = uavcan.primitive.scalar.Real32_1_0._deserialize_(_des_)
+        assert _des_.consumed_bit_length % 8 == 0, 'Nested object alignment error'
+        # Temporary _f6_ holds the value of "I_ki"
+        _des_.pad_to_alignment(8)
+        _f6_ = uavcan.primitive.scalar.Real32_1_0._deserialize_(_des_)
+        assert _des_.consumed_bit_length % 8 == 0, 'Nested object alignment error'
         self = command_1_0(
             torque=_f0_,
             angle=_f1_,
             velocity=_f2_,
             angle_kp=_f3_,
-            velocity_kp=_f4_)
+            velocity_kp=_f4_,
+            I_kp=_f5_,
+            I_ki=_f6_)
         _des_.pad_to_alignment(8)
-        assert 160 <= (_des_.consumed_bit_length - _base_offset_) <= 160, \
+        assert 224 <= (_des_.consumed_bit_length - _base_offset_) <= 224, \
             'Bad deserialization of voltbro.foc.command.1.0'
         assert isinstance(self, command_1_0)
         return self
@@ -248,30 +316,33 @@ class command_1_0:
             'velocity=%s' % self.velocity,
             'angle_kp=%s' % self.angle_kp,
             'velocity_kp=%s' % self.velocity_kp,
+            'I_kp=%s' % self.I_kp,
+            'I_ki=%s' % self.I_ki,
         ])
         return f'voltbro.foc.command.1.0({_o_0_})'
 
-    _EXTENT_BYTES_ = 20
+    _EXTENT_BYTES_ = 28
 
     # The big, scary blog of opaque data below contains a serialized PyDSDL object with the metadata of the
     # DSDL type this class is generated from. It is needed for reflection and runtime introspection.
     # Eventually we should replace this with ad-hoc constants such that no blob is needed and the generated code
     # is not dependent on PyDSDL.
     _MODEL_: _pydsdl_.StructureType = _restore_constant_(
-        'ABzY8!FqOR0{_)k-D@316u+(cY|@$#KR`>p`Vb?vyG^T!h(c*K6s}Fvq*hSEWOjFQ&(OU)+nw1oS16>QrI8VZOrLz|yN`-beezH6'
-        'vEn}=_#Dsd?ET116QiU;FNDmVbLPxBzw<jYXQS`IqvMt0r(a8(k&I%GNS1LL^Dk)-GmnI#kqXHbGy3?F%JNX<8N1$0nb|UL-8Fa2'
-        'l<p@9ZJ>T)O~fk5gtsa}5BD`_5*a;2)>tOFNDNf;;Ei&<Wok!im3!u{(IbQ^mGK}~Oqyl%w?`yxE2I18IE$lB1jk536(!1s1xK9_'
-        '`t`}2u7x!5B=_=!D^H2+R?fVokj6AKFbKn~AYgRaz*xC)Vy_6&j5oOAYZ$@sTr8;CiNgp9xFRu2>IzJ)icy7BD$)=UMs-rZw9wja'
-        'w|SRPcg3m@iptk!(dZY5R0tW(qHag`(NBZcG5$QV2d`!{R0yF&Xy?i``uJwN(*4`s-mcV++(Wl{fJlrc?6wjKX)whyqx(oCLZd6F'
-        'q<W$Ye-boZG4B}g;1!8EMJ&x&NEM6BranPd`8tb8Dl$cQWajlaks{ARhKiVxlw!pCg#8!uz$39htTE^Xq|o|;Rc;ww_di8krO)dk'
-        '^FI^WO~1iq=!eY|XiRQP-_}w3X&%HpBpIvcu|2+1W9hrX`jY#$u)Zs-?+WWpduKgcK2xANL4ZmOEMtkX^<3j2Gn?SUSv^+d>L{L|'
-        '+R<;oIXC*K<Or2Lz~}*Y1TISUF#U3oEm4AGLa4%(Oes2t_w?n%O3~%eM}ipZJ=vmVhaQ-b>isr)^deWE6yHnuSrSw~M?`9LbuTBf'
-        '*$4!NgOFWe4S}S$)Vi9ojAHT~nh%f=ICdXg)z2@`DB?+dml0gI+W9<2sG7Z6^sq)_1oJyHRjYn41H2<r=g8EC@&MCq@WgfyF6g>l'
-        '4B9S2jO^}XgsrDEDXx+EJdi=b@K%9rVNuZT<*w`C)t>8sCiVCLw*j0gSFhKq@CHo6oA+S~PVe7v0~w7tmd}MlVHz7sK_cP&CcHBb'
-        '?;=N554{bFgr3+1@Ik?N_;62x_ZOSH_zfQ&I*;Kp)Cw$N9<H^Ca-+Ta+$on^yZ~b904s<)#lHY`QK#Z%#QPL{a(BToz6>8EyqCCY'
-        'KBd}^yV?_^J$6<o@D=Q)!4L4Dn+CU@1`T$k`5zfE*6Zh4BF9iW=zaKcs^mxeUH7CzYLU_S{JF#CMZdfCz}GV$uj9iVH>;U_TqQm|'
-        'cEG6eM6o&|`hN9`Gt)D(v$N->XWp)!ZY`Hhi$cG`qizcEL!(d|3Ev^%J0uQ5o#C$OXu$2pMTz7yK$zk-Ave?Ag!u*4BP~94ESN3D'
-        '6fhVE4Xf}Id<&1^XZQnt&%0`K@nAWZqqC2rvtN$R`+z=Jn&X?kY6rQ&*0k+#KJ%~6JP?@Iy598{FNwqsgvk>J1U>BL1Dv<)IQ0+S'
-        '{&a`_^?zC}?!g53ib*TIfYJ*cY0J1r{G&5oLFvkF;~w#E&Ugc*8@r8r#HH~=ls?>Tyi;u1>-`P*WodfH4FCW'
+        'ABzY8$6rBd0{_)k-)kL36uzzb*~FL-e}I;H^&v)Tcbird5rxufs9c+-Nv)uS$?Wdro}qhpw>z_Gu24upOCuu+nLhc_N5MzMCm%}x'
+        '1RoV8;y)qy5YO!Fy}7x!H%3Vxav@~)oHJ+6eBU=SXT9g%w<D$er(R6zfe1o}2$pgh@=vK3GKctaEr|t}OsgjsWt#aiOWD<W!t|zo'
+        '^|rpHCsi+rXbt`2t8pm3G<H^E-@$n`8U<PnkX4on9!DBVs{dLs-qe*NmC_x3TdN^LrA)b(Nhb6X=Ic^PGfJ!8S<b>>r-EZ7ppp`4'
+        '%7UZT2)*ifMpu0rIf6S`#HAzS^hU;<MW2Q=)zA-vjUr%pNyBI{alBgvNy=+n@>Q&0a5jvo+>OH!@wg-*i>eZIrHobiR7g^b1FY(}'
+        'dUn1s-Ar>Xpzo4#Arz(0^@3JU6Cn{Yng*?j?qZ%Atz!LIU>06UsV@;ifzZwtW6bfzSgG~5y}ezk9JzyOGY^p%j@V5ZN2JCiOSS4D'
+        'LF{W)LMK(@E%+0!Zppl*!GY%m?kQkN%6uwWpf}VAS>bCeAW57`!UH|0#)ycs)Mw}j8A&KstVYbgkb4dZW5gPZo<|9-%^T;YR#o>y'
+        '#8tSw8mI0@aeCdYapAjuJpme$o5D3b3OC8TkozQM)hsm2?{F+!OROunYlw9%v92Z7nQ~4$hCZF6I!=HJEG%V_G<>ddpXm*7;j|jf'
+        '_i7~`q1(!@&nDOEsNe{dSwO2ky95pj^)U5ZzFQ(=lE$&jQ;CFPa(Gi+Jg6<&J@gPSM7}2)vfPme?nt(OYc+hH%MbGJMf@xTs-7Tm'
+        'qE)$D5>c;tF_wdnU1GHuMQ@~aIbkWq&F{#(kNCjx^ucBI)I1FW9#uPn;HvS?Wg$XUZ}(z`RT?6gU+Kw8`D@|f9g)~Xx-yV?xZN6$'
+        '%n8B)T{DAzbBYinGy51}YYC0=Yh*6-gqJJ4L69L94b8LMavi+Tb{){D8t&sZfD^^&rAirIh6#A(E=<D7y$@VpN&}Ac*>WgM;enD6'
+        '2{^j}ug}37sF9TeKL+`R9(fAj?OgHjPFI2V=963W4euVfj^QFyax7sEt~7;mtvUMGI+q%{0Al0-%ZNM0KM#Gu4&z0|dk{X+NjTP*'
+        ';)8_u5|{PI#Qm7%o}ldUWce|^f~_+62JW@W;Kt*S!LDuoPeqKj=Q&K`7-$x~hdxde`e?rEj<85AFdCjcbI`izwYMI)YWlr3e7M7U'
+        'IW>=~z^BJF7-b$wRz*bLDt~fnYI<g7=FHUeYvq%T;gW7h=pp>nDj|Mg5^5shS|nVH#D1hR*wP*K+1WTKkURu}$!`;KJ?Rw8kLVt1'
+        '=&5T&&-;72c;RA(z)4^*1`1Z-d-xK5fgj*E_!YL`clZ<j$Xb{^zdyu^#@ofl+btUJJt*rh!m%S*F>PRfqgS^qo%&B}?u&{mEnUGg'
+        '7vjjYlhGsF3pHrF3+&cRGxjgp{<4eyeb^%xx@Z$VW5QU^q4nI3wGrHA{>}z3qjkA6xXt{t4PHm<dS`H(xd^_G*882oZRR5Q0a_n)'
+        '2Dh1u;4QRnbq4P?o0IDN1H;Nd&a(~x00'
     )
     assert isinstance(_MODEL_, _pydsdl_.StructureType)

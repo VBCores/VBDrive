@@ -85,10 +85,6 @@ __attribute__((hot, flatten)) void main_callback() {
     value_dt = last_cycle_cost;
     #endif
     #endif
-
-    /*if (TIM4->SR & TIM_SR_UIF) {
-        TIM4->SR &= ~TIM_SR_UIF;
-    }*/
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
@@ -123,15 +119,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
                 .angle_kp = debug_angle_kp,
                 .velocity_kp = debug_velocity_kp,
             });
-            motor->set_current_regulator_params(PIDConfig{
-                .multiplier = 1.0f,
-                .kp = debug_I_kp,
-                .ki = debug_I_ki,
-                .kd = 0.0f,
-                .integral_error_lim = 50.0f,
-                .max_output = 10.0f,
-                .min_output = -10.0f,
-            });
+            motor->set_current_regulator_params(debug_I_kp, debug_I_ki);
         }
         #endif
 
@@ -141,6 +129,11 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 
 micros __attribute__((optimize("O0"))) micros_64() {
     return ((micros)millis_k * 1000u) + __HAL_TIM_GetCounter(&htim7);
+}
+
+micros system_time() {
+    // TODO: network-wide time sync
+    return micros_64();
 }
 
 void start_timers() {

@@ -38,7 +38,7 @@ void configure_fdcan(FDCAN_HandleTypeDef* hfdcan) {
     hfdcan->Init.DataTimeSeg1 = 5;
     hfdcan->Init.DataTimeSeg2 = 4;
     hfdcan->Init.StdFiltersNbr = 0;
-    hfdcan->Init.ExtFiltersNbr = 1;
+    hfdcan->Init.ExtFiltersNbr = 3;
     hfdcan->Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
 
     hfdcan->Init.NominalPrescaler = app_configurator.get_nom_prescaler();
