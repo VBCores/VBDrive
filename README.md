@@ -22,7 +22,7 @@ The board uses a UART-based serial interface to configure parameters and control
 
 * **Get Parameter**:
   `<parameter_name>:?`
-  Example: `max_speed:?` → `max_speed:1200.000000`
+  Example: `node_id:?` → `node_id:11`
 
 * **Set Parameter**:
   `<parameter_name>:<value>`
@@ -140,13 +140,13 @@ Here’s the **Cyphal Runtime Interface** section for the BLDC Motor Controller 
 
 The BLDC Motor Controller communicates over **Cyphal/FDCAN** to publish real-time telemetry and receive control commands.
 
+> We use some custom datatypes, see here: [VoltBro cyphal types repository](https://github.com/voltbro/cyphal-types)
+
 ### **Published Messages**
 
-| Port ID | Message Type                                 | Interval | Description                      |
-| ------- | -------------------------------------------- | -------- | -------------------------------- |
-| `6998`  | `uavcan.si.unit.angle.Scalar.1.0`            | 10 ms    | Current rotor angle (radians)    |
-| `7006`  | `uavcan.si.unit.angular_velocity.Scalar.1.0` | 10 ms    | Current angular velocity (rad/s) |
-| `1423`  | `uavcan.si.unit.torque.Scalar.1.0`           | 10 ms    | Current torque (Nm)              |
+| Port ID | Message Type                              | Interval | Description                                   |
+| ------- | ----------------------------------------- | -------- | --------------------------------------------- |
+| `3811`  | `voltbro.foc.state_simple.1.0`            | 1 ms     | Current state (angle, speed, torque, etc.)    |
 
 ---
 
@@ -163,7 +163,7 @@ The BLDC Motor Controller communicates over **Cyphal/FDCAN** to publish real-tim
 
 | Register Name | Type   | Description                                         |
 | ------------- | ------ | --------------------------------------------------- |
-| `motor.is_on` | `bool` | Turns motor drive on/off via Cyphal register access |
+| `motor.is_on` | `bool` | Turns underlying motor driver on/off                |
 
 ---
 
@@ -173,6 +173,13 @@ The controller also supports standard Cyphal services:
 
 * **uavcan.node.GetInfo** — Reports node information (name: `"org.voltbro.vbdrive"`)
 * **uavcan.register.Access** — For reading/writing runtime parameters
+* **uavcan.register.List** — List registers
 * **uavcan.node.Heartbeat** — Node status monitoring
+
+### **Standard Cyphal Messages**
+
+The controller also publishes standard Cyphal messages:
+
+* **uavcan.node.Heartbeat** - default heartbeat message
 
 ---
