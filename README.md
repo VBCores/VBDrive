@@ -10,7 +10,7 @@ The board uses a UART-based serial interface to configure parameters and control
 
 ### **Connection Details**
 
-* **Baud Rate**: 115200
+* **Baud Rate**: 19200
 * **Format**: Commands are ASCII strings, terminated with `\r`, `\n`, or spaces (automatically stripped)
 
 ---
