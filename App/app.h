@@ -9,7 +9,7 @@
 #include <voltbro/config/serial/serial.h>
 
 struct VBDriveConfig: public BaseConfigData {
-    static constexpr uint32_t TYPE_ID = 0x55CCCBBB;
+    static constexpr uint32_t TYPE_ID = 0x44CCCBBB;
     uint8_t gear_ratio = 0;
     // NAN means not set
     float max_voltage = NAN;

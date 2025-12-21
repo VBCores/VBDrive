@@ -71,8 +71,8 @@ void create_motor(VBDriveConfig& config_data) {
     // hardware limit is 50V, 30A (?)
     constexpr float MAX_VOLTAGE = 50.0f;
 
-    constexpr float DEFAULT_I_KP = 5.0;
-    constexpr float DEFAULT_I_KI = 1300.0;
+    constexpr float DEFAULT_I_KP = 4.0;
+    constexpr float DEFAULT_I_KI = 1600.0;
 
     motor = new (&motor_storage) VBDrive(
         0.000025f,
@@ -119,7 +119,7 @@ void create_motor(VBDriveConfig& config_data) {
             .stall_current = 6.0f,
             .stall_timeout = 3.0f,
             .stall_tolerance = 0.2f,
-            .calibration_voltage = 0.5f,
+            .calibration_voltage = 0.3f,
             .en_pin = GpioPin(DRV_WAKE_GPIO_Port, DRV_WAKE_Pin),
             .common = {
                 .ppairs = 14,
