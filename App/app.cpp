@@ -33,6 +33,21 @@
 #include <voltbro/utils.hpp>
 #pragma endregion
 
+#define NANOPRINTF_IMPLEMENTATION
+#define NANOPRINTF_USE_FIELD_WIDTH_FORMAT_SPECIFIERS 1
+#define NANOPRINTF_USE_PRECISION_FORMAT_SPECIFIERS   1
+#define NANOPRINTF_USE_FLOAT_FORMAT_SPECIFIERS       1 // Set to 0 if you don't print floats
+#define NANOPRINTF_USE_LARGE_FORMAT_SPECIFIERS       1 // Required for 'l' (long) and 'll' (long long)
+#define NANOPRINTF_USE_SMALL_FORMAT_SPECIFIERS       1 // Required for 'hh' (char) and 'h' (short)
+#define NANOPRINTF_USE_BINARY_FORMAT_SPECIFIERS      0 // Set to 1 if you want %b for binary
+#define NANOPRINTF_USE_WRITEBACK_FORMAT_SPECIFIERS   0 // Set to 1 for %n (rarely used, security risk)
+#include "nanoprintf.h"
+extern "C" {
+    bool global_allocation_lock = false;
+}
+
+
+
 void setup_cordic() {
     CORDIC_ConfigTypeDef cordic_config {
         .Function = CORDIC_FUNCTION_COSINE,
@@ -60,7 +75,7 @@ InductiveSensor inductive_sensor(
     GpioPin(SPI3_CS_GPIO_Port, SPI3_CS_Pin)
 );
 VBInverter motor_inverter(&hadc1, &hadc2);
-// Static storage to avoid heap usage in the hot path.
+alignas(4) static CalibrationData calibration_data;  // avoid stack overflow and misalignment issues
 static std::aligned_storage_t<sizeof(VBDrive), alignof(VBDrive)> motor_storage;
 static VBDrive* motor = nullptr;
 VBDrive* get_motor() {
@@ -119,7 +134,7 @@ void create_motor(VBDriveConfig& config_data) {
             .stall_current = 6.0f,
             .stall_timeout = 3.0f,
             .stall_tolerance = 0.2f,
-            .calibration_voltage = 0.3f,
+            .calibration_voltage = 0.2f,
             .en_pin = GpioPin(DRV_WAKE_GPIO_Port, DRV_WAKE_Pin),
             .common = {
                 .ppairs = 14,
@@ -141,11 +156,14 @@ void create_motor(VBDriveConfig& config_data) {
 }
 
 void apply_calibration() {
-    CalibrationData calibration_data;
-    HAL_IMPORTANT(eeprom.read<CalibrationData>(&calibration_data, CALIBRATION_PLACEMENT))
+    if (calibration_data.type_id == 0) {  // uninitialized, try to read from EEPROM
+        HAL_IMPORTANT(eeprom.read<CalibrationData>(&calibration_data, CALIBRATION_PLACEMENT))
+    }
+    calibration_data.reset();  // TODO: remove after testing
     if (calibration_data.type_id != CalibrationData::TYPE_ID || !calibration_data.was_calibrated) {
         calibration_data.reset();
-        motor->calibrate(calibration_data);
+        // NOTE: see app.h lines 51-53 for details on cyphal_queue_buffer_shared
+        motor->calibrate(calibration_data, cyphal_queue_buffer_shared);
         calibration_data.was_calibrated = true;
         HAL_IMPORTANT(eeprom.write<CalibrationData>(&calibration_data, CALIBRATION_PLACEMENT))
     }
@@ -153,28 +171,32 @@ void apply_calibration() {
 }
 
 [[noreturn]] void app() {
-    #pragma region StartupConfiguration
+#pragma region StartupConfiguration
     start_timers();
     eeprom.wait_until_available();
     auto& app_config = get_app_config();
     app_config.init();
     auto& config_data = app_config.get_config();
-    setup_cordic();
-    start_cyphal();
-    #pragma endregion
-
-    create_motor(config_data);
 
     if (!app_config.is_app_running()) {
         // Hold here until configured and rebooted (in interrupt handler in config.cpp)
         while (true) {}
     }
 
+    setup_cordic();
+    create_motor(config_data);
     motor->start();
     apply_calibration();
     motor->set_voltage_point(0.0f);
 
+    start_cyphal();
     set_cyphal_mode(uavcan_node_Mode_1_0_OPERATIONAL);
+
+    // Lock heap
+    // NOTE: heap is used only by control block of shared_ptr,
+    //       so in order to keep same API with Linux, we allow tiny heap
+    global_allocation_lock = true;
+#pragma endregion
 
     HAL_TIM_Base_Start_IT(&htim4);
 

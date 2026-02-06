@@ -53,6 +53,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Drivers/libvoltbro
     Drivers/CMSIS/DSP/Include
     Drivers/cyphal_types
+    Drivers/Third-Party
 )
 
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE

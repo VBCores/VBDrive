@@ -23,11 +23,13 @@
 /* Includes */
 #include <errno.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 /**
  * Pointer to the current high watermark of the heap usage
  */
 static uint8_t *__sbrk_heap_end = NULL;
+extern bool global_allocation_lock;
 
 /**
  * @brief _sbrk() allocates memory to the newlib heap and is used by malloc
@@ -52,6 +54,9 @@ static uint8_t *__sbrk_heap_end = NULL;
  */
 void *_sbrk(ptrdiff_t incr)
 {
+  if (global_allocation_lock) {
+    Error_Handler();
+  }
   extern uint8_t _end; /* Symbol defined in the linker script */
   extern uint8_t _estack; /* Symbol defined in the linker script */
   extern uint32_t _Min_Stack_Size; /* Symbol defined in the linker script */

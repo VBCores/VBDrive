@@ -46,7 +46,14 @@ constexpr size_t CONFIG_PLACEMENT = CALIBRATION_PLACEMENT + sizeof(CalibrationDa
 constexpr size_t IND_SENSOR_STATE_PLACEMENT = CONFIG_PLACEMENT + sizeof(VBDriveConfig) + 1;
 
 // communications.cpp
-inline constexpr size_t CYPHAL_QUEUE_SIZE = 50;
+inline constexpr size_t CYPHAL_QUEUE_SIZE = 40;
+
+// NOTE: due to RAM constraints, this buffer if first used for calibration then reused for Cyphal queue.
+//       It should be big enough for both purposes. For calibration, it should be >=(1024+1)*4 for guaranteed alignment
+extern std::byte cyphal_queue_buffer_shared[
+    static_cast<size_t>(CYPHAL_QUEUE_SIZE * sizeof(CanardTxQueueItem) * QUEUE_SIZE_MULT)
+];
+
 inline constexpr millis DELAY_ON_ERROR_MS = 500;
 std::shared_ptr<CyphalInterface> get_interface();
 void in_loop_reporting(millis);

@@ -94,10 +94,20 @@ __attribute__((hot, flatten)) void cyphal_loop() {
     }
 }
 
+static std::byte cyphal_bss_buffer[
+    sizeof(CyphalInterface) +
+    sizeof(G4CAN) +
+    sizeof(O1Allocator)
+] __attribute__((aligned(4)));
+std::byte cyphal_queue_buffer_shared[
+    static_cast<size_t>(CYPHAL_QUEUE_SIZE * sizeof(CanardTxQueueItem) * QUEUE_SIZE_MULT)
+] __attribute__((aligned(O1HEAP_ALIGNMENT)));
+
 void start_cyphal() {
     configure_fdcan(&hfdcan1);
 
-    cyphal_interface = std::shared_ptr<CyphalInterface>(CyphalInterface::create_heap<G4CAN, O1Allocator>(
+    cyphal_interface = std::shared_ptr<CyphalInterface>(CyphalInterface::create_bss<G4CAN, O1Allocator>(
+        cyphal_bss_buffer,
         #ifndef LCM
         get_app_config().get_node_id(),
         #else
@@ -105,7 +115,8 @@ void start_cyphal() {
         #endif
         &hfdcan1,
         CYPHAL_QUEUE_SIZE,
-        utilities
+        utilities,
+        cyphal_queue_buffer_shared
     ));
 
     setup_subscriptions();
