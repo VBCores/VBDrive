@@ -50,9 +50,11 @@ inline constexpr size_t CYPHAL_QUEUE_SIZE = 40;
 
 // NOTE: due to RAM constraints, this buffer if first used for calibration then reused for Cyphal queue.
 //       It should be big enough for both purposes. For calibration, it should be >=(1024+1)*4 for guaranteed alignment
-extern std::byte cyphal_queue_buffer_shared[
+constexpr size_t SHARED_BUFFER_SIZE = std::max(
+    (CALIBRATION_BUFF_SIZE + 1) * sizeof(int),
     static_cast<size_t>(CYPHAL_QUEUE_SIZE * sizeof(CanardTxQueueItem) * QUEUE_SIZE_MULT)
-];
+);
+extern std::byte cyphal_queue_buffer_shared[SHARED_BUFFER_SIZE];
 
 inline constexpr millis DELAY_ON_ERROR_MS = 500;
 std::shared_ptr<CyphalInterface> get_interface();

@@ -36,17 +36,15 @@
 #define NANOPRINTF_IMPLEMENTATION
 #define NANOPRINTF_USE_FIELD_WIDTH_FORMAT_SPECIFIERS 1
 #define NANOPRINTF_USE_PRECISION_FORMAT_SPECIFIERS   1
-#define NANOPRINTF_USE_FLOAT_FORMAT_SPECIFIERS       1 // Set to 0 if you don't print floats
-#define NANOPRINTF_USE_LARGE_FORMAT_SPECIFIERS       1 // Required for 'l' (long) and 'll' (long long)
-#define NANOPRINTF_USE_SMALL_FORMAT_SPECIFIERS       1 // Required for 'hh' (char) and 'h' (short)
-#define NANOPRINTF_USE_BINARY_FORMAT_SPECIFIERS      0 // Set to 1 if you want %b for binary
-#define NANOPRINTF_USE_WRITEBACK_FORMAT_SPECIFIERS   0 // Set to 1 for %n (rarely used, security risk)
+#define NANOPRINTF_USE_FLOAT_FORMAT_SPECIFIERS       1 // float
+#define NANOPRINTF_USE_LARGE_FORMAT_SPECIFIERS       1 // 'l' (long), 'll' (long long)
+#define NANOPRINTF_USE_SMALL_FORMAT_SPECIFIERS       1 // 'hh' (char), 'h' (short)
+#define NANOPRINTF_USE_BINARY_FORMAT_SPECIFIERS      0 // %b (binary)
+#define NANOPRINTF_USE_WRITEBACK_FORMAT_SPECIFIERS   0 // %n
 #include "nanoprintf.h"
 extern "C" {
     bool global_allocation_lock = false;
 }
-
-
 
 void setup_cordic() {
     CORDIC_ConfigTypeDef cordic_config {
@@ -159,11 +157,10 @@ void apply_calibration() {
     if (calibration_data.type_id == 0) {  // uninitialized, try to read from EEPROM
         HAL_IMPORTANT(eeprom.read<CalibrationData>(&calibration_data, CALIBRATION_PLACEMENT))
     }
-    calibration_data.reset();  // TODO: remove after testing
     if (calibration_data.type_id != CalibrationData::TYPE_ID || !calibration_data.was_calibrated) {
         calibration_data.reset();
         // NOTE: see app.h lines 51-53 for details on cyphal_queue_buffer_shared
-        motor->calibrate(calibration_data, cyphal_queue_buffer_shared);
+        motor->calibrate(calibration_data, cyphal_queue_buffer_shared, SHARED_BUFFER_SIZE);
         calibration_data.was_calibrated = true;
         HAL_IMPORTANT(eeprom.write<CalibrationData>(&calibration_data, CALIBRATION_PLACEMENT))
     }
