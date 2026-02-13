@@ -38,7 +38,7 @@ void configure_fdcan(FDCAN_HandleTypeDef* hfdcan) {
     hfdcan->Init.DataTimeSeg1 = 5;
     hfdcan->Init.DataTimeSeg2 = 4;
     hfdcan->Init.StdFiltersNbr = 0;
-    hfdcan->Init.ExtFiltersNbr = 3;
+    hfdcan->Init.ExtFiltersNbr = 4;
     hfdcan->Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
 
     hfdcan->Init.NominalPrescaler = app_configurator.get_nom_prescaler();
@@ -127,8 +127,8 @@ bool VBDriveConfig::set(const std::string& param, std::string& value, UARTRespon
         return result;
     }
 
-    int new_int_value;
-    float new_float_value;
+    int new_int_value = 0;
+    float new_float_value = 0;
     bool is_converted = false;
     if (param == GEAR_RATIO_PARAM) {
         is_converted = safe_stoi(value, new_int_value);

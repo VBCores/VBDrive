@@ -99,9 +99,7 @@ static std::byte cyphal_bss_buffer[
     sizeof(G4CAN) +
     sizeof(O1Allocator)
 ] __attribute__((aligned(4)));
-std::byte cyphal_queue_buffer_shared[
-    static_cast<size_t>(CYPHAL_QUEUE_SIZE * sizeof(CanardTxQueueItem) * QUEUE_SIZE_MULT)
-] __attribute__((aligned(O1HEAP_ALIGNMENT)));
+std::byte cyphal_queue_buffer_shared[SHARED_BUFFER_SIZE] __attribute__((aligned(O1HEAP_ALIGNMENT)));
 
 void start_cyphal() {
     configure_fdcan(&hfdcan1);
@@ -146,7 +144,11 @@ __weak void setup_subscriptions() {
     );
 }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+// NOTE: <current_t> parameter required by the interface, but not used in this implementation
 __weak void in_loop_reporting(millis current_t) {
+#pragma GCC diagnostic pop
     // SEND REGULAR MESSAGES HERE
     // OR DEFINE THIS FUNCTION ELSEWHERE
     // OR MODIFY cyphal_loop

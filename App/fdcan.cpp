@@ -5,8 +5,8 @@ FDCAN_HandleTypeDef hfdcan1;
 extern "C" {
 
 void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef* fdcanHandle) {
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-    RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
+    GPIO_InitTypeDef GPIO_InitStruct = {};
+    RCC_PeriphCLKInitTypeDef PeriphClkInit = {};
 
     if(fdcanHandle->Instance==FDCAN1) {
         PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_FDCAN;

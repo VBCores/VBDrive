@@ -80,7 +80,8 @@ __attribute__((hot, flatten)) void main_callback() {
     }
     #ifdef FOC_PROFILE
     last_cycle_cost = DWT->CYCCNT - start_cycles;
-    value_invocations += 1;
+    // <'++'/'+='/... expression of 'volatile'-qualified type is deprecated> - C++20
+    value_invocations = value_invocations + 1;
     #if !defined(ENABLE_DT) && defined(MONITOR)
     value_dt = last_cycle_cost;
     #endif
@@ -89,7 +90,8 @@ __attribute__((hot, flatten)) void main_callback() {
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
     if (htim->Instance == TIM7) {
-        millis_k += 1;
+        // <'++'/'+='/... expression of 'volatile'-qualified type is deprecated> - C++20
+        millis_k = millis_k + 1;
     } else if (htim->Instance == TIM2) {
         HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
     } else if (htim->Instance == TIM4) {

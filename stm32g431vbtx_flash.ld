@@ -55,8 +55,19 @@ ENTRY(Reset_Handler)
 /* Highest address of the user mode stack */
 _estack = ORIGIN(RAM) + LENGTH(RAM);    /* end of RAM */
 /* Generate a link error if heap and stack don't fit into RAM */
-_Min_Heap_Size = 0x100;      /* required amount of heap  */
-_Min_Stack_Size = 0x4000; /* required amount of stack */
+
+/* NOTE: heap is used only by control block of shared_ptr for CyphalInterface and its subscriptions
+**       so in order to keep same API with Linux, we allow tiny heap
+**.      but ideally dynamic memory should not be used at all
+*/
+_Min_Heap_Size = 0x100;   /* 256 Bytes */
+
+/* NOTE: profiling showed top usage of ~700 bytes */
+_Min_Stack_Size = 0x1000; /* 4096 Bytes Stack */
+
+/* NOTE: For stack usage profiling */
+__StackTop = ORIGIN(RAM) + LENGTH(RAM);
+__StackLimit = __StackTop - _Min_Stack_Size;
 
 /* Specify the memory areas */
 MEMORY

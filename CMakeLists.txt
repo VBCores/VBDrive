@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD 23)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
 set(CMAKE_CXX_STANDARD 20)
@@ -60,7 +60,6 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     -DUSE_HAL_DRIVER
     -DSTM32_G
     -DARM_MATH_CM4
-    -D__FPU_PRESENT
 )
 
 add_compile_options(
@@ -88,7 +87,7 @@ target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
 
 set(
     CMAKE_EXE_LINKER_FLAGS
-    "${CMAKE_EXE_LINKER_FLAGS} -mfloat-abi=hard -mfpu=fpv4-sp-d16 -u _printf_float"
+    "${CMAKE_EXE_LINKER_FLAGS} -mfloat-abi=hard -mfpu=fpv4-sp-d16"
 )
 
 add_custom_command(

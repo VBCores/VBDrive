@@ -1,4 +1,4 @@
-#pragma region Includes
+//#pragma region Includes
 #include "app.h"
 
 #include <memory>
@@ -31,7 +31,7 @@
 #include <voltbro/encoders/ASxxxx/AS5047P.hpp>
 #include <voltbro/motors/bldc/vbdrive/vbdrive.hpp>
 #include <voltbro/utils.hpp>
-#pragma endregion
+//#pragma endregion
 
 #define NANOPRINTF_IMPLEMENTATION
 #define NANOPRINTF_USE_FIELD_WIDTH_FORMAT_SPECIFIERS 1
@@ -43,8 +43,46 @@
 #define NANOPRINTF_USE_WRITEBACK_FORMAT_SPECIFIERS   0 // %n
 #include "nanoprintf.h"
 extern "C" {
+    // During setup we need tiny heap for shared_ptr of CyphalInterface for API compatibility reasons
     bool global_allocation_lock = false;
 }
+
+#ifdef FOC_PROFILE
+extern uint32_t __StackLimit;
+extern uint32_t __StackTop;
+constexpr uint32_t STACK_CANARY = 0xDEADBEEF;
+volatile static size_t max_stack_usage = 0;
+
+void mark_stack() {
+    uint32_t current_sp;
+    __asm__ volatile ("mov %0, sp" : "=r" (current_sp));
+
+    volatile uint32_t *p = static_cast<volatile uint32_t*>(&__StackLimit);
+    volatile uint32_t *sp = reinterpret_cast<volatile uint32_t*>(current_sp);
+
+    while (p < sp) {
+        *p = STACK_CANARY;
+        p++;
+    }
+}
+
+void measure_stack_usage() {
+    volatile uint32_t *p = static_cast<volatile uint32_t*>(&__StackLimit);
+    volatile uint32_t *top = static_cast<volatile uint32_t*>(&__StackTop);
+
+    while (p < top && *p == STACK_CANARY) {
+        p++;
+    }
+
+    size_t unused = static_cast<size_t>(p - &__StackLimit);
+    size_t total = static_cast<size_t>(&__StackTop - &__StackLimit);
+    size_t used = total - unused;
+
+    if (used > max_stack_usage) {
+        max_stack_usage = used;
+    }
+}
+#endif
 
 void setup_cordic() {
     CORDIC_ConfigTypeDef cordic_config {
@@ -64,7 +102,7 @@ EEPROM& get_eeprom() {
     return eeprom;
 }
 
-// correct is_inverted and elec_offset values will be set by apply_calibration
+// correct elec_offset will be set by apply_calibration
 AS5047P motor_encoder(GpioPin(SPI1_CS0_GPIO_Port, SPI1_CS0_Pin), &hspi1);
 InductiveSensor inductive_sensor(
     eeprom,
@@ -73,7 +111,7 @@ InductiveSensor inductive_sensor(
     GpioPin(SPI3_CS_GPIO_Port, SPI3_CS_Pin)
 );
 VBInverter motor_inverter(&hadc1, &hadc2);
-alignas(4) static CalibrationData calibration_data;  // avoid stack overflow and misalignment issues
+alignas(4) static CalibrationData calibration_data;  // avoid stack overflow and misalignment issues for I2C EEPROM
 static std::aligned_storage_t<sizeof(VBDrive), alignof(VBDrive)> motor_storage;
 static VBDrive* motor = nullptr;
 VBDrive* get_motor() {
@@ -140,7 +178,7 @@ void create_motor(VBDriveConfig& config_data) {
                     config_data.gear_ratio,
                     static_cast<uint8_t>(36),
                     static_cast<uint8_t>(0)
-            ),
+                ),
                 .user_angle_offset = value_or_default(config_data.angle_offset, 0.0f)
             }
         },
@@ -167,8 +205,11 @@ void apply_calibration() {
     motor->apply_calibration(calibration_data);
 }
 
-[[noreturn]] void app() {
-#pragma region StartupConfiguration
+void app() {
+#ifdef FOC_PROFILE
+    mark_stack();
+#endif
+//#pragma region StartupConfiguration
     start_timers();
     eeprom.wait_until_available();
     auto& app_config = get_app_config();
@@ -189,21 +230,30 @@ void apply_calibration() {
     start_cyphal();
     set_cyphal_mode(uavcan_node_Mode_1_0_OPERATIONAL);
 
-    // Lock heap
-    // NOTE: heap is used only by control block of shared_ptr,
-    //       so in order to keep same API with Linux, we allow tiny heap
+    // Lock heap, no dynamic memory is used at runtime
     global_allocation_lock = true;
-#pragma endregion
+//#pragma endregion
 
     HAL_TIM_Base_Start_IT(&htim4);
 
+    #ifdef FOC_PROFILE
+    static millis stack_measurement_time = 0;
+    #endif
+
     while(true) {
         cyphal_loop();
+
+        #ifdef FOC_PROFILE
+        millis current_time = millis_32();
+        EACH_N(current_time, stack_measurement_time, 100, {
+            measure_stack_usage();
+        })
+        #endif
     }
 }
 
 #ifndef NO_CYPHAL
-#pragma region Cyphal
+//#pragma region Cyphal
 #ifdef LCM
 #include "lcm.h"
 #else
@@ -244,7 +294,11 @@ void in_loop_reporting(millis current_t) {
 class FOCCommandSub: public AbstractSubscription<FOCCommand> {
 public:
     FOCCommandSub(InterfacePtr interface, CanardPortID port_id): AbstractSubscription<FOCCommand>(interface, port_id) {};
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wunused-parameter"
+    // NOTE: transfer parameter required by the interface, but not used in this implementation
     void handler(const FOCCommand::Type& msg, CanardRxTransfer* _) override {
+    #pragma GCC diagnostic pop
         motor->set_foc_point(FOCTarget {
             .torque = msg._torque.newton_meter,
             .angle = msg.angle.radian,
@@ -256,11 +310,38 @@ public:
     }
 };
 
+class SpecificControlSub: public AbstractSubscription<SpecificControl> {
+public:
+    SpecificControlSub(InterfacePtr interface, CanardPortID port_id): AbstractSubscription<SpecificControl>(interface, port_id) {};
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wunused-parameter"
+    // NOTE: transfer parameter required by the interface, but not used in this implementation
+    void handler(const SpecificControl::Type& msg, CanardRxTransfer* _) override {
+    #pragma GCC diagnostic pop
+        switch (msg.set_point_type){
+            case voltbro_foc_specific_control_1_0_VELOCITY:
+                motor->set_velocity_point(msg.set_point_value);
+                break;
+            case voltbro_foc_specific_control_1_0_TORQUE:
+                motor->set_torque_point(msg.set_point_value);
+                break;
+            case voltbro_foc_specific_control_1_0_POSITION:
+                motor->set_angle_point(msg.set_point_value);
+                break;
+            case voltbro_foc_specific_control_1_0_VOLTAGE:
+                motor->set_voltage_point(msg.set_point_value);
+                break;
+            default:
+                break;
+        }
+    }
+};
+
+// NOTE: underlying CanardRxSubscriptions are HUGE - 552 bytes each. C++ wrapper size is negligible in comparison
 ReservedObject<NodeInfoReader> node_info_reader;
 ReservedObject<RegistersHandler<1>> registers_handler;
-// TODO: Specific control
-//ReservedObject<SpecificControlSub> specific_control_sub;
 ReservedObject<FOCCommandSub> foc_command_sub;
+ReservedObject<SpecificControlSub> specific_control_sub;
 #endif
 
 void setup_subscriptions() {
@@ -324,8 +405,7 @@ void setup_subscriptions() {
         0
     );
 
-    // TODO: specific control
-    //specific_control_sub.create(cyphal_interface, SPECIFIC_CONTROL_PORT + node_id);
+    specific_control_sub.create(cyphal_interface, SPECIFIC_CONTROL_PORT + node_id);
     foc_command_sub.create(cyphal_interface, FOC_COMMAND_PORT + node_id);
 
     HAL_IMPORTANT(apply_filter(
@@ -346,17 +426,12 @@ void setup_subscriptions() {
         node_info_reader->make_filter(node_id)
     ))
 
-    // TODO: Specific control
-    /*
-    filter_index += 1;
     HAL_IMPORTANT(apply_filter(
-        filter_index,
+        3,
         &hfdcan1,
-        &sFilterConfig,
         specific_control_sub->make_filter(node_id)
     ))
-    */
 #endif
 }
-#pragma endregion
+//#pragma endregion
 #endif
