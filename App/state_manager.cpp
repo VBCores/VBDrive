@@ -2,6 +2,8 @@
 
 #include "usart.h"
 
+#include <cmath>
+
 constexpr auto make_action(auto f1, auto f2) {
     return std::make_tuple(
         std::function<bool()>(f1),
@@ -97,23 +99,25 @@ bool VBDriveConfig::are_required_params_set() {
     return BaseConfigData::are_required_params_set() && gear_ratio != 0;
 }
 
-static constexpr std::string GEAR_RATIO_PARAM = "gear_ratio";
-static constexpr std::string MAX_CURRENT_PARAM = "max_current";
-static constexpr std::string MAX_SPEED_PARAM = "max_speed";
-static constexpr std::string MAX_TORQUE_PARAM = "max_torque";
-static constexpr std::string ANGLE_OFFSET_PARAM = "angle_offset";
-static constexpr std::string MIN_ANGLE_PARAM = "min_angle";
-static constexpr std::string MAX_ANGLE_PARAM = "max_angle";
-static constexpr std::string TORQUE_CONST_PARAM = "torque_const";
+static constexpr std::string GEAR_RATIO_PARAM = "gear";
+static constexpr std::string MAX_CURRENT_PARAM = "max_i";
+static constexpr std::string MAX_SPEED_PARAM = "max_spd";
+static constexpr std::string MAX_TORQUE_PARAM = "max_tq";
+static constexpr std::string ANGLE_OFFSET_PARAM = "ang_off";
+static constexpr std::string MIN_ANGLE_PARAM = "min_ang";
+static constexpr std::string MAX_ANGLE_PARAM = "max_ang";
+static constexpr std::string TORQUE_CONST_PARAM = "kt";
 static constexpr std::string KP_PARAM = "kp";
 static constexpr std::string KI_PARAM = "ki";
 static constexpr std::string KD_PARAM = "kd";
-static constexpr std::string FILTER_A_PARAM = "filter_a";
-static constexpr std::string FILTER_G1_PARAM = "filter_g1";
-static constexpr std::string FILTER_G2_PARAM = "filter_g2";
-static constexpr std::string FILTER_G3_PARAM = "filter_g3";
-static constexpr std::string FILTER_I_LPF_PARAM = "I_lpf";
-static constexpr std::string ANGLE_ENCODER_PARAM = "angle_encoder";
+static constexpr std::string FILTER_A_PARAM = "flt_a";
+static constexpr std::string FILTER_G1_PARAM = "flt_g1";
+static constexpr std::string FILTER_G2_PARAM = "flt_g2";
+static constexpr std::string FILTER_G3_PARAM = "flt_g3";
+static constexpr std::string FILTER_I_LPF_PARAM = "i_lpf";
+static constexpr std::string VELOCITY_LPF_PARAM = "vel_lpf";
+static constexpr std::string I_Q_SLEW_RATE_PARAM = "iq_slew";
+static constexpr std::string ANGLE_ENCODER_PARAM = "ang_enc";
 
 void VBDriveConfig::print_self(UARTResponseAccumulator& responses) {
     get(GEAR_RATIO_PARAM, responses);
@@ -132,6 +136,8 @@ void VBDriveConfig::print_self(UARTResponseAccumulator& responses) {
     get(FILTER_G2_PARAM, responses);
     get(FILTER_G3_PARAM, responses);
     get(FILTER_I_LPF_PARAM, responses);
+    get(VELOCITY_LPF_PARAM, responses);
+    get(I_Q_SLEW_RATE_PARAM, responses);
     get(NODE_ID_PARAM, responses);
     get(FDCAN_DATA_PARAM, responses);
     get(FDCAN_NOMINAL_PARAM, responses);
@@ -145,28 +151,28 @@ void VBDriveConfig::get(const std::string& param, UARTResponseAccumulator& respo
         return;
     }
     if (param == GEAR_RATIO_PARAM) {
-        responses.append("gear_ratio:%u\n\r", value_or_default(gear_ratio, VBDriveDefaults::GEAR_RATIO, static_cast<uint8_t>(0)));
+        responses.append("gear:%u\n\r", value_or_default(gear_ratio, VBDriveDefaults::GEAR_RATIO, static_cast<uint8_t>(0)));
     }
     else if (param == MAX_CURRENT_PARAM) {
-        responses.append("max_current:%f\n\r", value_or_default(max_current, NAN));
+        responses.append("max_i:%f\n\r", value_or_default(max_current, NAN));
     }
     else if (param == MAX_SPEED_PARAM) {
-        responses.append("max_speed:%f\n\r", value_or_default(max_speed, NAN));
+        responses.append("max_spd:%f\n\r", value_or_default(max_speed, NAN));
     }
     else if (param == MAX_TORQUE_PARAM) {
-        responses.append("max_torque:%f\n\r", value_or_default(max_torque, NAN));
+        responses.append("max_tq:%f\n\r", value_or_default(max_torque, NAN));
     }
     else if (param == ANGLE_OFFSET_PARAM) {
-        responses.append("angle_offset:%f\n\r", value_or_default(angle_offset, VBDriveDefaults::ANGLE_OFFSET));
+        responses.append("ang_off:%f\n\r", value_or_default(angle_offset, VBDriveDefaults::ANGLE_OFFSET));
     }
     else if (param == MIN_ANGLE_PARAM) {
-        responses.append("min_angle:%f\n\r", value_or_default(min_angle, NAN));
+        responses.append("min_ang:%f\n\r", value_or_default(min_angle, NAN));
     }
     else if (param == MAX_ANGLE_PARAM) {
-        responses.append("max_angle:%f\n\r", value_or_default(max_angle, NAN));
+        responses.append("max_ang:%f\n\r", value_or_default(max_angle, NAN));
     }
     else if (param == TORQUE_CONST_PARAM) {
-        responses.append("torque_const:%f\n\r", value_or_default(torque_const, VBDriveDefaults::TORQUE_CONST));
+        responses.append("kt:%f\n\r", value_or_default(torque_const, VBDriveDefaults::TORQUE_CONST));
     }
     else if (param == KI_PARAM) {
         responses.append("ki:%f\n\r", value_or_default(ki, VBDriveDefaults::PID_KI));
@@ -178,22 +184,28 @@ void VBDriveConfig::get(const std::string& param, UARTResponseAccumulator& respo
         responses.append("kd:%f\n\r", value_or_default(kd, VBDriveDefaults::PID_KD));
     }
     else if (param == FILTER_A_PARAM) {
-        responses.append("filter_a:%f\n\r", value_or_default(filter_a, VBDriveDefaults::FILTER_A));
+        responses.append("flt_a:%f\n\r", value_or_default(filter_a, VBDriveDefaults::FILTER_A));
     }
     else if (param == FILTER_G1_PARAM) {
-        responses.append("filter_g1:%f\n\r", value_or_default(filter_g1, VBDriveDefaults::FILTER_G1));
+        responses.append("flt_g1:%f\n\r", value_or_default(filter_g1, VBDriveDefaults::FILTER_G1));
     }
     else if (param == FILTER_G2_PARAM) {
-        responses.append("filter_g2:%f\n\r", value_or_default(filter_g2, VBDriveDefaults::FILTER_G2));
+        responses.append("flt_g2:%f\n\r", value_or_default(filter_g2, VBDriveDefaults::FILTER_G2));
     }
     else if (param == FILTER_G3_PARAM) {
-        responses.append("filter_g3:%f\n\r", value_or_default(filter_g3, VBDriveDefaults::FILTER_G3));
+        responses.append("flt_g3:%f\n\r", value_or_default(filter_g3, VBDriveDefaults::FILTER_G3));
     }
     else if (param == FILTER_I_LPF_PARAM) {
-        responses.append("I_lpf:%f\n\r", value_or_default(I_lpf_coefficient, VBDriveDefaults::I_LPF));
+        responses.append("i_lpf:%f\n\r", value_or_default(I_lpf_coefficient, VBDriveDefaults::I_LPF));
+    }
+    else if (param == VELOCITY_LPF_PARAM) {
+        responses.append("vel_lpf:%f\n\r", value_or_default(velocity_lpf_coefficient, VBDriveDefaults::VELOCITY_LPF));
+    }
+    else if (param == I_Q_SLEW_RATE_PARAM) {
+        responses.append("iq_slew:%f\n\r", value_or_default(i_q_slew_rate, VBDriveDefaults::I_Q_SLEW_RATE));
     }
     else if (param == ANGLE_ENCODER_PARAM) {
-        responses.append("angle_encoder:%u\n\r", to_underlying(angle_encoder));
+        responses.append("ang_enc:%u\n\r", to_underlying(angle_encoder));
     }
     else {
         responses.append("ERROR: Unknown parameter\n\r");
@@ -222,11 +234,11 @@ bool VBDriveConfig::set(const std::string& param, std::string& value, UARTRespon
 
     if (param == GEAR_RATIO_PARAM) {
         gear_ratio = static_cast<uint8_t>(new_int_value);
-        responses.append("OK: gear_ratio:%d\n\r", static_cast<int>(gear_ratio));
+        responses.append("OK: gear:%d\n\r", static_cast<int>(gear_ratio));
     }
     else if (param == ANGLE_ENCODER_PARAM) {
         angle_encoder = static_cast<AngleEncoderType>(new_int_value);
-        responses.append("OK: angle_encoder:%u\n\r", to_underlying(angle_encoder));
+        responses.append("OK: ang_enc:%u\n\r", to_underlying(angle_encoder));
     }
     CHECK_AND_SET_PARAM_FLOAT(max_current, MAX_CURRENT_PARAM)
     CHECK_AND_SET_PARAM_FLOAT(max_speed, MAX_SPEED_PARAM)
@@ -242,7 +254,23 @@ bool VBDriveConfig::set(const std::string& param, std::string& value, UARTRespon
     CHECK_AND_SET_PARAM_FLOAT(filter_g1, FILTER_G1_PARAM)
     CHECK_AND_SET_PARAM_FLOAT(filter_g2, FILTER_G2_PARAM)
     CHECK_AND_SET_PARAM_FLOAT(filter_g3, FILTER_G3_PARAM)
-    CHECK_AND_PRINT_PARAM_FLOAT(I_lpf_coefficient, FILTER_I_LPF_PARAM)
+    CHECK_AND_SET_PARAM_FLOAT(I_lpf_coefficient, FILTER_I_LPF_PARAM)
+    else if (param == VELOCITY_LPF_PARAM) {
+        if (!std::isfinite(new_float_value) || new_float_value < 0.0f || new_float_value > 1.0f) {
+            responses.append("ERROR: Invalid value\n\r");
+            return false;
+        }
+        velocity_lpf_coefficient = new_float_value;
+        responses.append("OK: vel_lpf:%f\n\r", velocity_lpf_coefficient);
+    }
+    else if (param == I_Q_SLEW_RATE_PARAM) {
+        if (!std::isfinite(new_float_value) || new_float_value < 0.0f) {
+            responses.append("ERROR: Invalid value\n\r");
+            return false;
+        }
+        i_q_slew_rate = new_float_value;
+        responses.append("OK: iq_slew:%f\n\r", i_q_slew_rate);
+    }
     else {
         responses.append("ERROR: Unknown parameter\n\r");
         return false;

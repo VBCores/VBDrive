@@ -18,10 +18,12 @@ namespace VBDriveDefaults {
     inline constexpr float FILTER_G2 = 3.925227776360174f;
     inline constexpr float FILTER_G3 = 387.54711795263574f;
     inline constexpr float I_LPF = 0.0925f;
+    inline constexpr float VELOCITY_LPF = 1.0f;
+    inline constexpr float I_Q_SLEW_RATE = 0.0f;
 }  // namespace VBDriveDefaults
 
 struct __attribute__((packed)) VBDriveConfig: public BaseConfigData {
-    static constexpr uint32_t TYPE_ID = 0x44AAABBB;
+    static constexpr uint32_t TYPE_ID = 0x44AAABCC;
     uint8_t gear_ratio = 0;
     // NAN means not set
     float max_voltage = NAN;
@@ -40,6 +42,8 @@ struct __attribute__((packed)) VBDriveConfig: public BaseConfigData {
     float filter_g2 = NAN;
     float filter_g3 = NAN;
     float I_lpf_coefficient = NAN;
+    float velocity_lpf_coefficient = NAN;
+    float i_q_slew_rate = NAN;
     AngleEncoderType angle_encoder = AngleEncoderType::ROTOR;
 
     VBDriveConfig(): BaseConfigData() {
@@ -69,16 +73,16 @@ protected:
     static constexpr std::string_view TEST_COMMAND = "TEST";
     static constexpr std::string_view CALIBRATE_COMMAND = "CALIBRATE";
     static constexpr std::string_view STOP_COMMAND = "STOP";
-    static constexpr std::string_view VEL_PARAM = "do.velocity";
-    static constexpr std::string_view ANGLE_PARAM = "do.angle";
-    static constexpr std::string_view FREE_COMMAND = "do.free";
-    static constexpr std::string_view START_LOGGING_COMMAND = "log.start";
-    static constexpr std::string_view STOP_LOGGING_COMMAND = "log.stop";
+    static constexpr std::string_view VEL_PARAM = "do_vel";
+    static constexpr std::string_view ANGLE_PARAM = "do_ang";
+    static constexpr std::string_view FREE_COMMAND = "do_free";
+    static constexpr std::string_view START_LOGGING_COMMAND = "log_on";
+    static constexpr std::string_view STOP_LOGGING_COMMAND = "log_off";
 
     const std::array<std::string_view, 3> editable_in_test_mode = {
-        "min_angle",
-        "max_angle",
-        "angle_offset"
+        "min_ang",
+        "max_ang",
+        "ang_off"
     };
 
     bool _is_logging = false;

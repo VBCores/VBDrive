@@ -132,7 +132,9 @@ void create_motor(VBDriveConfig& config_data) {
             .g1 = value_or_default(config_data.filter_g1, VBDriveDefaults::FILTER_G1),
             .g2 = value_or_default(config_data.filter_g2, VBDriveDefaults::FILTER_G2),
             .g3 = value_or_default(config_data.filter_g3, VBDriveDefaults::FILTER_G3),
-            .I_lpf_coefficient = value_or_default(config_data.I_lpf_coefficient, VBDriveDefaults::I_LPF)
+            .I_lpf_coefficient = value_or_default(config_data.I_lpf_coefficient, VBDriveDefaults::I_LPF),
+            .velocity_lpf_coefficient = value_or_default(config_data.velocity_lpf_coefficient, VBDriveDefaults::VELOCITY_LPF),
+            .i_q_slew_rate = value_or_default(config_data.i_q_slew_rate, VBDriveDefaults::I_Q_SLEW_RATE)
         },
         // Q Regulator
         PIDConfig {
