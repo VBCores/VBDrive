@@ -187,7 +187,7 @@ void VBDriveConfig::get(const std::string& param, UARTResponseAccumulator& respo
         responses.append("filter_g2:%f\n\r", value_or_default(filter_g2, VBDriveDefaults::FILTER_G2));
     }
     else if (param == FILTER_G3_PARAM) {
-        responses.append("filter_g3:%f\n\r", value_or_default(filter_g2, VBDriveDefaults::FILTER_G3));
+        responses.append("filter_g3:%f\n\r", value_or_default(filter_g3, VBDriveDefaults::FILTER_G3));
     }
     else if (param == FILTER_I_LPF_PARAM) {
         responses.append("I_lpf:%f\n\r", value_or_default(I_lpf_coefficient, VBDriveDefaults::I_LPF));
