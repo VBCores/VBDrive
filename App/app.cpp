@@ -167,7 +167,7 @@ void create_motor(VBDriveConfig& config_data) {
         DriveInfo {
             .torque_const = value_or_default(config_data.torque_const, VBDriveDefaults::TORQUE_CONST),
             .max_current = 30.0,
-            .max_torque = 100.0f,
+            .max_torque = 30.0f,
             .stall_current = 6.0f,
             .stall_timeout = 3.0f,
             .stall_tolerance = 0.2f,
