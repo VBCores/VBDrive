@@ -183,8 +183,6 @@ void VBDriveConfig::print_self(UARTResponseAccumulator& responses) {
     get(FILTER_G2_PARAM, responses);
     get(FILTER_G3_PARAM, responses);
     get(FILTER_I_LPF_PARAM, responses);
-    get(VELOCITY_LPF_PARAM, responses);
-    get(I_Q_SLEW_RATE_PARAM, responses);
     get(NODE_ID_PARAM, responses);
     get(FDCAN_DATA_PARAM, responses);
     get(FDCAN_NOMINAL_PARAM, responses);

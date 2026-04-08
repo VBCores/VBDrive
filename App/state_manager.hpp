@@ -41,8 +41,6 @@ struct __attribute__((packed)) VBDriveConfig: public BaseConfigData {
     float filter_g2 = NAN;
     float filter_g3 = NAN;
     float I_lpf_coefficient = NAN;
-    float velocity_lpf_coefficient = NAN;
-    float i_q_slew_rate = NAN;
     AngleEncoderType angle_encoder = AngleEncoderType::ROTOR;
 
     VBDriveConfig(): BaseConfigData() {
