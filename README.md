@@ -68,6 +68,10 @@ The board uses a UART-based serial interface for configuration, calibration, tes
 | `d_baud`   | FDCAN data baud rate enum (see below)                     | Enum    | `0`, `1`, `2`  |
 | `n_baud`   | FDCAN nominal baud rate enum (see below)                  | Enum    | `3`, `4`       |
 
+**Important notes**:
+
+* `vel_lpf` ONLY affects control loop for smoother operation. Reported speed is not changed
+
 ---
 
 ### **FDCAN Baud Rate Configuration**
