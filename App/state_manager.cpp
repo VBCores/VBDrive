@@ -115,8 +115,6 @@ static constexpr std::string FILTER_G1_PARAM = "flt_g1";
 static constexpr std::string FILTER_G2_PARAM = "flt_g2";
 static constexpr std::string FILTER_G3_PARAM = "flt_g3";
 static constexpr std::string FILTER_I_LPF_PARAM = "i_lpf";
-static constexpr std::string VELOCITY_LPF_PARAM = "vel_lpf";
-static constexpr std::string I_Q_SLEW_RATE_PARAM = "iq_slew";
 static constexpr std::string ANGLE_ENCODER_PARAM = "ang_enc";
 
 void VBDriveConfig::print_self(UARTResponseAccumulator& responses) {
@@ -136,8 +134,6 @@ void VBDriveConfig::print_self(UARTResponseAccumulator& responses) {
     get(FILTER_G2_PARAM, responses);
     get(FILTER_G3_PARAM, responses);
     get(FILTER_I_LPF_PARAM, responses);
-    get(VELOCITY_LPF_PARAM, responses);
-    get(I_Q_SLEW_RATE_PARAM, responses);
     get(NODE_ID_PARAM, responses);
     get(FDCAN_DATA_PARAM, responses);
     get(FDCAN_NOMINAL_PARAM, responses);
@@ -198,12 +194,6 @@ void VBDriveConfig::get(const std::string& param, UARTResponseAccumulator& respo
     else if (param == FILTER_I_LPF_PARAM) {
         responses.append("i_lpf:%f\n\r", value_or_default(I_lpf_coefficient, VBDriveDefaults::I_LPF));
     }
-    else if (param == VELOCITY_LPF_PARAM) {
-        responses.append("vel_lpf:%f\n\r", value_or_default(velocity_lpf_coefficient, VBDriveDefaults::VELOCITY_LPF));
-    }
-    else if (param == I_Q_SLEW_RATE_PARAM) {
-        responses.append("iq_slew:%f\n\r", value_or_default(i_q_slew_rate, VBDriveDefaults::I_Q_SLEW_RATE));
-    }
     else if (param == ANGLE_ENCODER_PARAM) {
         responses.append("ang_enc:%u\n\r", to_underlying(angle_encoder));
     }
@@ -255,22 +245,6 @@ bool VBDriveConfig::set(const std::string& param, std::string& value, UARTRespon
     CHECK_AND_SET_PARAM_FLOAT(filter_g2, FILTER_G2_PARAM)
     CHECK_AND_SET_PARAM_FLOAT(filter_g3, FILTER_G3_PARAM)
     CHECK_AND_SET_PARAM_FLOAT(I_lpf_coefficient, FILTER_I_LPF_PARAM)
-    else if (param == VELOCITY_LPF_PARAM) {
-        if (!std::isfinite(new_float_value) || new_float_value < 0.0f || new_float_value > 1.0f) {
-            responses.append("ERROR: Invalid value\n\r");
-            return false;
-        }
-        velocity_lpf_coefficient = new_float_value;
-        responses.append("OK: vel_lpf:%f\n\r", velocity_lpf_coefficient);
-    }
-    else if (param == I_Q_SLEW_RATE_PARAM) {
-        if (!std::isfinite(new_float_value) || new_float_value < 0.0f) {
-            responses.append("ERROR: Invalid value\n\r");
-            return false;
-        }
-        i_q_slew_rate = new_float_value;
-        responses.append("OK: iq_slew:%f\n\r", i_q_slew_rate);
-    }
     else {
         responses.append("ERROR: Unknown parameter\n\r");
         return false;

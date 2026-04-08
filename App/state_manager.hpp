@@ -18,12 +18,10 @@ namespace VBDriveDefaults {
     inline constexpr float FILTER_G2 = 3.925227776360174f;
     inline constexpr float FILTER_G3 = 387.54711795263574f;
     inline constexpr float I_LPF = 0.0925f;
-    inline constexpr float VELOCITY_LPF = 1.0f;
-    inline constexpr float I_Q_SLEW_RATE = 0.0f;
 }  // namespace VBDriveDefaults
 
 struct __attribute__((packed)) VBDriveConfig: public BaseConfigData {
-    static constexpr uint32_t TYPE_ID = 0x44AAABCC;
+    static constexpr uint32_t TYPE_ID = 0x44AAABFE;
     uint8_t gear_ratio = 0;
     // NAN means not set
     float max_voltage = NAN;
@@ -42,8 +40,6 @@ struct __attribute__((packed)) VBDriveConfig: public BaseConfigData {
     float filter_g2 = NAN;
     float filter_g3 = NAN;
     float I_lpf_coefficient = NAN;
-    float velocity_lpf_coefficient = NAN;
-    float i_q_slew_rate = NAN;
     AngleEncoderType angle_encoder = AngleEncoderType::ROTOR;
 
     VBDriveConfig(): BaseConfigData() {

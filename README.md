@@ -61,16 +61,10 @@ The board uses a UART-based serial interface for configuration, calibration, tes
 | `flt_g2`   | Filter gain 2                                             | Float   | `0.1`          |
 | `flt_g3`   | Filter gain 3                                             | Float   | `0.1`          |
 | `i_lpf`    | Current low-pass filter coefficient                       | Float   | `0.1`          |
-| `vel_lpf`  | Control velocity LPF coefficient `[0..1]`, `1.0` disables | Float   | `0.2`, `1.0`   |
-| `iq_slew`  | Iq target slew rate in A/s, `0.0` disables                | Float   | `500.0`        |
 | `ang_enc`  | Angle encoder type enum, 0 rotor, 1 - shaft               | Integer | `0`, `1`.      |
 | `node_id`  | Cyphal/CAN node ID                                        | Integer | `1`, `42`      |
 | `d_baud`   | FDCAN data baud rate enum (see below)                     | Enum    | `0`, `1`, `2`  |
 | `n_baud`   | FDCAN nominal baud rate enum (see below)                  | Enum    | `3`, `4`       |
-
-**Important notes**:
-
-* `vel_lpf` ONLY affects control loop for smoother operation. Reported speed is not changed
 
 ---
 
