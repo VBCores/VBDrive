@@ -4,6 +4,13 @@
 
 #include <cmath>
 
+#define BOOT_REQUEST_MAGIC          0xB00710ADUL
+#define BOOT_CFG_NODE_ID_MASK       0x7FFUL
+#define BOOT_CFG_NOMINAL_SHIFT      11U
+#define BOOT_CFG_DATA_SHIFT         19U
+#define BOOT_CFG_FD_MODE_BIT        27U
+#define BOOT_CFG_BITRATE_SWITCH_BIT 28U
+
 constexpr auto make_action(auto f1, auto f2) {
     return std::make_tuple(
         std::function<bool()>(f1),
@@ -33,6 +40,47 @@ DriveStateController drive_state_controller(
 
 DriveStateController& get_app_manager() {
     return drive_state_controller;
+}
+
+static void boot_request_access_enable() {
+    __HAL_RCC_PWR_CLK_ENABLE();
+    HAL_PWR_EnableBkUpAccess();
+}
+
+static void boot_request_access_disable() {
+    HAL_PWR_DisableBkUpAccess();
+}
+
+static uint32_t boot_request_pack(uint32_t node_id, uint8_t nominal_prescaler, uint8_t data_prescaler) {
+    uint32_t packed = node_id & BOOT_CFG_NODE_ID_MASK;
+    packed |= ((uint32_t)nominal_prescaler << BOOT_CFG_NOMINAL_SHIFT);
+    packed |= ((uint32_t)data_prescaler << BOOT_CFG_DATA_SHIFT);
+    packed |= (1UL << BOOT_CFG_FD_MODE_BIT);
+    return packed;
+}
+
+void reboot_to_bootloader() {
+    auto motor = get_motor();
+
+    if (motor != nullptr) {
+        motor->set_foc_point(FOCTarget{0});
+        motor->stop();
+    }
+
+    (void)HAL_FDCAN_Stop(&hfdcan1);
+
+    boot_request_access_enable();
+    TAMP->BKP0R = BOOT_REQUEST_MAGIC;
+    TAMP->BKP1R = boot_request_pack(
+        drive_state_controller.get_node_id(),
+        drive_state_controller.get_nom_prescaler(),
+        drive_state_controller.get_data_prescaler()
+    );
+    TAMP->BKP2R = 0U;
+    boot_request_access_disable();
+
+    HAL_Delay(50);
+    NVIC_SystemReset();
 }
 
 static constexpr uint16_t UART_RX_BUFFER_SIZE = 32;

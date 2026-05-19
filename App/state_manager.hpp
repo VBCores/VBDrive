@@ -4,6 +4,7 @@
 #include <voltbro/motors/bldc/vbdrive/vbdrive.hpp>
 
 VBDrive* get_motor();
+void reboot_to_bootloader();
 
 namespace VBDriveDefaults {
     inline constexpr float MAX_VOLTAGE = 50.0f;
@@ -69,6 +70,7 @@ protected:
     static constexpr std::string_view TEST_COMMAND = "TEST";
     static constexpr std::string_view CALIBRATE_COMMAND = "CALIBRATE";
     static constexpr std::string_view STOP_COMMAND = "STOP";
+    static constexpr std::string_view BOOT_COMMAND = "BOOT";
     static constexpr std::string_view VEL_PARAM = "do_vel";
     static constexpr std::string_view ANGLE_PARAM = "do_ang";
     static constexpr std::string_view FREE_COMMAND = "do_free";
@@ -124,6 +126,12 @@ public:
     }
 
     void process_command(std::string& command, UARTResponseAccumulator& responses) override {
+        if (command == BOOT_COMMAND) {
+            responses.append("Rebooting to bootloader\n\r");
+            wait_for_uart();
+            reboot_to_bootloader();
+            return;
+        }
         if (BaseConfigurator::app_state == CommandState::RUNNING) {
             if (command == TEST_COMMAND) {
                 BaseConfigurator::app_state = CommandState::TESTING;

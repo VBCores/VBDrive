@@ -52,6 +52,7 @@ extern FDCAN_HandleTypeDef hfdcan1;
 // state_manager.cpp
 DriveStateController& get_app_manager();
 void configure_fdcan(FDCAN_HandleTypeDef*);
+void reboot_to_bootloader();
 
 template <typename T>
 inline T value_or_default(T value, T default_value) {
