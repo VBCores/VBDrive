@@ -56,6 +56,7 @@ static uint32_t boot_request_pack(uint32_t node_id, uint8_t nominal_prescaler, u
     packed |= ((uint32_t)nominal_prescaler << BOOT_CFG_NOMINAL_SHIFT);
     packed |= ((uint32_t)data_prescaler << BOOT_CFG_DATA_SHIFT);
     packed |= (1UL << BOOT_CFG_FD_MODE_BIT);
+    packed |= (1UL << BOOT_CFG_BITRATE_SWITCH_BIT);
     return packed;
 }
 
