@@ -123,6 +123,13 @@ VBDrive* get_motor() {
     return motor;
 }
 
+static int8_t config_angle_direction(const VBDriveConfig& config_data) {
+    if (config_data.max_voltage == -1.0f) {
+        return -1;
+    }
+    return 1;
+}
+
 void create_motor(VBDriveConfig& config_data) {
     motor = new (&motor_storage) VBDrive(
         0.000025f,
@@ -161,7 +168,8 @@ void create_motor(VBDriveConfig& config_data) {
             .user_speed_limit = value_or_default(config_data.max_speed, NAN),
             .user_position_lower_limit = value_or_default(config_data.min_angle, NAN),
             .user_position_upper_limit = value_or_default(config_data.max_angle, NAN),
-            .user_angle_offset = value_or_default(config_data.angle_offset, VBDriveDefaults::ANGLE_OFFSET)
+            .user_angle_offset = value_or_default(config_data.angle_offset, VBDriveDefaults::ANGLE_OFFSET),
+            .user_angle_direction = config_angle_direction(config_data)
         },
         // Built-in constant parameters
         DriveInfo {
@@ -249,7 +257,20 @@ void app() {
     auto& config_data = app_manager.get_config();
 
     if (!app_manager.is_app_running()) {
-        // Hold here until configured and REBOOTED (by APPLY command)
+        // Not fully configured. If node_id is set, start Cyphal so the device
+        // can be configured via CAN registers. After config is saved, reset.
+        if (config_data.node_id != 0) {
+            start_cyphal();
+            set_cyphal_mode(uavcan_node_Mode_1_0_OPERATIONAL);
+            while (true) {
+                cyphal_loop();
+                persist_pending_config_if_needed();
+                reboot_to_bootloader_if_requested();
+                if (app_manager.is_app_running()) {
+                    HAL_NVIC_SystemReset();
+                }
+            }
+        }
         while (true) {}
     }
 
@@ -383,6 +404,23 @@ static bool update_persistent_config_u32_register(ConfigU32Setter config_setter,
     return request_config_save(config);
 }
 
+static bool update_persistent_direction_register(int32_t value) {
+    if (value != -1 && value != 1) {
+        return false;
+    }
+
+    DriveLimits limits = motor->get_limits();
+    limits.user_angle_direction = static_cast<int8_t>(value);
+    if (!motor->set_limits(limits)) {
+        return false;
+    }
+
+    auto& config = get_app_manager().get_config();
+    // Keep EEPROM layout stable: max_voltage is not used by VBDrive runtime.
+    config.max_voltage = static_cast<float>(value);
+    return request_config_save(config);
+}
+
 
 void in_loop_reporting(millis current_t) {
     static millis report_time = 0;
@@ -465,7 +503,7 @@ public:
 
 // NOTE: underlying CanardRxSubscriptions are HUGE - 552 bytes each. C++ wrapper size is negligible in comparison
 ReservedObject<NodeInfoReader> node_info_reader;
-ReservedObject<RegistersHandler<23>> registers_handler;
+ReservedObject<RegistersHandler<24>> registers_handler;
 ReservedObject<FOCCommandSub> foc_command_sub;
 ReservedObject<SpecificControlSub> specific_control_sub;
 void setup_subscriptions() {
@@ -562,7 +600,7 @@ void setup_subscriptions() {
     };
 
     registers_handler.create(
-        std::array<RegisterDefinition, 23>{{
+        std::array<RegisterDefinition, 24>{{
             {
                 "state.is_on",
                 [](
@@ -644,6 +682,25 @@ void setup_subscriptions() {
                 &DriveLimits::user_angle_offset,
                 [](VBDriveConfig& config, float value) { config.angle_offset = value; }
             ),
+            {
+                "angle.direction",
+                [](
+                    const uavcan_register_Value_1_0& v_in,
+                    uavcan_register_Value_1_0& v_out,
+                    RegisterAccessResponse::Type& response
+                ){
+                    if (v_in._tag_ != REGISTER_EMPTY_TAG) {
+                        int32_t value = 0;
+                        if (parse_register_integer32(v_in, value)) {
+                            update_persistent_direction_register(value);
+                        }
+                    }
+
+                    response.persistent = true;
+                    response._mutable = true;
+                    fill_register_integer32(v_out, motor->get_limits().user_angle_direction);
+                }
+            },
             make_config_u32_register(
                 "node.id",
                 [](const VBDriveConfig& config) { return static_cast<uint32_t>(config.node_id); },
