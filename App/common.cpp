@@ -130,7 +130,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 }
 
 micros __attribute__((optimize("O0"))) micros_64() {
-    return ((micros)millis_k * 1000u) + __HAL_TIM_GetCounter(&htim7);
+    return ((micros)millis_32() * 1000u) + __HAL_TIM_GetCounter(&htim7);
 }
 
 micros system_time() {
@@ -144,6 +144,10 @@ void start_timers() {
 }
 
 millis millis_32() {
+    if (__HAL_TIM_GET_FLAG(&htim7, TIM_FLAG_UPDATE) != RESET) {
+        __HAL_TIM_CLEAR_FLAG(&htim7, TIM_FLAG_UPDATE);
+        millis_k = millis_k + 1;
+    }
     return millis_k;
 }
 

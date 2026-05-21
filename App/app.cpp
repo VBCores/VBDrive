@@ -35,6 +35,8 @@
 #include <voltbro/utils.hpp>
 //#pragma endregion
 
+static constexpr CanardNodeID UNCONFIGURED_SETUP_NODE_ID = 126;
+
 //#pragma region ExternConfiguration
 #define NANOPRINTF_IMPLEMENTATION
 #define NANOPRINTF_USE_FIELD_WIDTH_FORMAT_SPECIFIERS 1
@@ -255,23 +257,26 @@ void app() {
     app_manager.init();
     start_uart_recv_it();
     auto& config_data = app_manager.get_config();
+    if (!app_manager.is_app_running() && config_data.are_required_params_set()) {
+        config_data.was_configured = true;
+        app_manager.set_state(CommandState::RUNNING);
+    }
 
     if (!app_manager.is_app_running()) {
-        // Not fully configured. If node_id is set, start Cyphal so the device
-        // can be configured via CAN registers. After config is saved, reset.
-        if (config_data.node_id != 0) {
-            start_cyphal();
-            set_cyphal_mode(uavcan_node_Mode_1_0_OPERATIONAL);
-            while (true) {
-                cyphal_loop();
-                persist_pending_config_if_needed();
-                reboot_to_bootloader_if_requested();
-                if (app_manager.is_app_running()) {
-                    HAL_NVIC_SystemReset();
-                }
+        // Bring up Cyphal even with blank EEPROM so config can be restored over CAN.
+        if (config_data.node_id == 0) {
+            config_data.node_id = UNCONFIGURED_SETUP_NODE_ID;
+        }
+        start_cyphal();
+        set_cyphal_mode(uavcan_node_Mode_1_0_OPERATIONAL);
+        while (true) {
+            cyphal_loop();
+            persist_pending_config_if_needed();
+            reboot_to_bootloader_if_requested();
+            if (app_manager.is_app_running()) {
+                HAL_NVIC_SystemReset();
             }
         }
-        while (true) {}
     }
 
     setup_cordic();
@@ -283,10 +288,6 @@ void app() {
     // Warm up
     for (uint8_t i = 0; i < 32; ++i) {
         motor->update();
-    }
-
-    while (!app_manager.is_app_running()) {
-        // Hold here until calibrated
     }
 
     start_cyphal();
@@ -423,6 +424,10 @@ static bool update_persistent_direction_register(int32_t value) {
 
 
 void in_loop_reporting(millis current_t) {
+    if (motor == nullptr) {
+        return;
+    }
+
     static millis report_time = 0;
     EACH_N(current_t, report_time, 1, {
         FOCState::Type state_msg = {};
@@ -506,6 +511,26 @@ ReservedObject<NodeInfoReader> node_info_reader;
 ReservedObject<RegistersHandler<24>> registers_handler;
 ReservedObject<FOCCommandSub> foc_command_sub;
 ReservedObject<SpecificControlSub> specific_control_sub;
+
+static bool parse_bool_register_value_robust(const uavcan_register_Value_1_0& value, bool& parsed) {
+    if (parse_register_bit(value, parsed)) {
+        return true;
+    }
+    if (value.integer32.value.count > 0) {
+        parsed = value.integer32.value.elements[0] != 0;
+        return true;
+    }
+    if (value.natural32.value.count > 0) {
+        parsed = value.natural32.value.elements[0] != 0U;
+        return true;
+    }
+    if (value.real32.value.count > 0) {
+        parsed = value.real32.value.elements[0] != 0.0f;
+        return true;
+    }
+    return false;
+}
+
 void setup_subscriptions() {
     auto cyphal_interface = get_interface();
 
@@ -610,7 +635,7 @@ void setup_subscriptions() {
                 ){
                     if (v_in._tag_ != REGISTER_EMPTY_TAG) {
                         bool value = false;
-                        if (parse_register_bit(v_in, value)) {
+                        if (parse_bool_register_value_robust(v_in, value)) {
                             motor->set_state(value);
                         }
                     }
@@ -642,7 +667,7 @@ void setup_subscriptions() {
                 ){
                     if (v_in._tag_ != REGISTER_EMPTY_TAG) {
                         bool value = false;
-                        if (parse_register_bit(v_in, value) && value) {
+                        if (parse_bool_register_value_robust(v_in, value) && value) {
                             bootloader_reboot_pending = true;
                         }
                     }
