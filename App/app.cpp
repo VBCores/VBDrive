@@ -17,17 +17,17 @@
 #include <cyphal/node/registers_utils.hpp>
 #include <cyphal/providers/G4CAN.h>
 
-#include <uavcan/node/Mode_1_0.h>
-#include <uavcan/primitive/scalar/Real32_1_0.h>
-#include <uavcan/si/unit/angular_velocity/Scalar_1_0.h>
-#include <uavcan/si/unit/angle/Scalar_1_0.h>
-#include <uavcan/si/unit/torque/Scalar_1_0.h>
-#include <uavcan/si/unit/voltage/Scalar_1_0.h>
-#include "uavcan/primitive/array/Real32_1_0.h"
-#include "uavcan/primitive/Empty_1_0.h"
-#include <voltbro/foc/command_1_0.h>
-#include <voltbro/foc/specific_control_1_0.h>
-#include <voltbro/foc/state_simple_1_0.h>
+#include <uavcan/node/Mode_1_0.hpp>
+#include <uavcan/primitive/Empty_1_0.hpp>
+#include <uavcan/primitive/array/Real32_1_0.hpp>
+#include <uavcan/primitive/scalar/Real32_1_0.hpp>
+#include <uavcan/si/unit/angular_velocity/Scalar_1_0.hpp>
+#include <uavcan/si/unit/angle/Scalar_1_0.hpp>
+#include <uavcan/si/unit/torque/Scalar_1_0.hpp>
+#include <uavcan/si/unit/voltage/Scalar_1_0.hpp>
+#include <voltbro/foc/command_1_0.hpp>
+#include <voltbro/foc/specific_control_1_0.hpp>
+#include <voltbro/foc/state_simple_1_0.hpp>
 
 #include <voltbro/eeprom/eeprom.hpp>
 #include <voltbro/encoders/ASxxxx/AS5047P.hpp>
@@ -334,9 +334,9 @@ void app() {
 
 #ifndef NO_CYPHAL
 //#pragma region Cyphal
-TYPE_ALIAS(FOCCommand, voltbro_foc_command_1_0)
-TYPE_ALIAS(FOCState, voltbro_foc_state_simple_1_0)
-TYPE_ALIAS(SpecificControl, voltbro_foc_specific_control_1_0)
+using FOCCommand = voltbro_foc_command_1_0;
+using FOCState = voltbro_foc_state_simple_1_0;
+using SpecificControl = voltbro_foc_specific_control_1_0;
 
 static constexpr CanardPortID FOC_COMMAND_PORT = 2107;
 static constexpr CanardPortID FOC_STATE_PORT = 3811;
@@ -430,7 +430,7 @@ void in_loop_reporting(millis current_t) {
 
     static millis report_time = 0;
     EACH_N(current_t, report_time, 1, {
-        FOCState::Type state_msg = {};
+        FOCState state_msg = {};
 
         state_msg.timestamp.microsecond = system_time();
 
@@ -449,7 +449,7 @@ void in_loop_reporting(millis current_t) {
         state_msg.has_fault.value = false; // TODO: fault check
 
         static CanardTransferID state_transfer_id = 0;
-        get_interface()->send_msg<FOCState>(&state_msg, FOC_STATE_PORT, &state_transfer_id);
+        get_interface()->send_msg(&state_msg, FOC_STATE_PORT, &state_transfer_id);
     })
 }
 
@@ -459,7 +459,7 @@ public:
     #pragma GCC diagnostic push
     #pragma GCC diagnostic ignored "-Wunused-parameter"
     // NOTE: transfer parameter required by the interface, but not used in this implementation
-    void handler(const FOCCommand::Type& msg, CanardRxTransfer* _) override {
+    void handler(const FOCCommand& msg, CanardRxTransfer* _) override {
     #pragma GCC diagnostic pop
         bool is_valid = motor->set_foc_point(FOCTarget {
             .torque = msg._torque.newton_meter,
@@ -481,7 +481,7 @@ public:
     #pragma GCC diagnostic push
     #pragma GCC diagnostic ignored "-Wunused-parameter"
     // NOTE: transfer parameter required by the interface, but not used in this implementation
-    void handler(const SpecificControl::Type& msg, CanardRxTransfer* _) override {
+    void handler(const SpecificControl& msg, CanardRxTransfer* _) override {
     #pragma GCC diagnostic pop
         bool is_valid = false;
         switch (msg.set_point_type){
@@ -553,7 +553,7 @@ void setup_subscriptions() {
             [limits_field, config_setter](
                 const uavcan_register_Value_1_0& v_in,
                 uavcan_register_Value_1_0& v_out,
-                RegisterAccessResponse::Type& response
+                RegisterAccessResponse& response
             ) {
                 if (v_in._tag_ != REGISTER_EMPTY_TAG) {
                     float value = 0.0f;
@@ -631,7 +631,7 @@ void setup_subscriptions() {
                 [](
                     const uavcan_register_Value_1_0& v_in,
                     uavcan_register_Value_1_0& v_out,
-                    RegisterAccessResponse::Type& response
+                    RegisterAccessResponse& response
                 ){
                     if (v_in._tag_ != REGISTER_EMPTY_TAG) {
                         bool value = false;
@@ -650,7 +650,7 @@ void setup_subscriptions() {
                 [](
                     const uavcan_register_Value_1_0& v_in,
                     uavcan_register_Value_1_0& v_out,
-                    RegisterAccessResponse::Type& response
+                    RegisterAccessResponse& response
                 ){
                     (void) v_in;
                     response.persistent = false;

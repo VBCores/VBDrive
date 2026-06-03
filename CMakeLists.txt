@@ -23,12 +23,13 @@ set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES
     OUTPUT_NAME ${CMAKE_PROJECT_NAME}
     SUFFIX ".elf"
 )
-add_subdirectory(cmake/stm32cubemx)
-
-target_link_libraries(${CMAKE_PROJECT_NAME}
-    stm32cubemx
-    ${CMAKE_CURRENT_SOURCE_DIR}/Drivers/CMSIS/DSP/Lib/GCC/libarm_cortexM4lf_math.a
+add_compile_definitions(
+    -DUSE_HAL_DRIVER
+    -DSTM32G4
+    -DARM_MATH_CM4
 )
+
+add_subdirectory(cmake/stm32cubemx)
 
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 )
@@ -38,12 +39,10 @@ target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
 )
 
 file(GLOB_RECURSE USER_SOURCES "App/*.cpp")
-file(GLOB_RECURSE LIBCXXCANARD_SOURCES "Drivers/libcxxcanard/cyphal/*.cpp" "Drivers/libcxxcanard/libs/*.c")
 file(GLOB_RECURSE LIBVOLTBRO_SOURCES "Drivers/libvoltbro/*.cpp" "Drivers/libvoltbro/*.c")
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${USER_SOURCES}
     ${LIBVOLTBRO_SOURCES}
-    ${LIBCXXCANARD_SOURCES}
 )
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
@@ -52,14 +51,21 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Drivers/libcxxcanard/libs
     Drivers/libvoltbro
     Drivers/CMSIS/DSP/Include
-    Drivers/cyphal_types
     Drivers/Third-Party
 )
 
-target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
-    -DUSE_HAL_DRIVER
-    -DSTM32G4
-    -DARM_MATH_CM4
+add_subdirectory(Drivers/libcxxcanard)
+target_link_libraries(libcxxcanard PUBLIC stm32cubemx)
+target_link_libraries(${CMAKE_PROJECT_NAME}
+    stm32cubemx
+    libcxxcanard
+    ${CMAKE_CURRENT_SOURCE_DIR}/Drivers/CMSIS/DSP/Lib/GCC/libarm_cortexM4lf_math.a
+)
+include(Drivers/cyphal_types/cyphal_types.cmake)
+cyphal_add_dsdl_types(${CMAKE_PROJECT_NAME}
+    TYPE_REPOS
+        ${CMAKE_CURRENT_SOURCE_DIR}/Drivers/cyphal_types/public_regulated_data_types
+        ${CMAKE_CURRENT_SOURCE_DIR}/Drivers/cyphal_types/voltbro
 )
 
 add_compile_options(
