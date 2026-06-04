@@ -34,6 +34,9 @@ volatile float value_dt = 0.0f;
 #endif
 
 #ifdef FOC_PROFILE
+#ifndef FOC_PROFILE_SAMPLE_PERIOD
+#define FOC_PROFILE_SAMPLE_PERIOD 256u
+#endif
 static bool dwt_ready = false;
 static inline void init_dwt() {
     if ((CoreDebug->DEMCR & CoreDebug_DEMCR_TRCENA_Msk) == 0) {
@@ -45,6 +48,7 @@ static inline void init_dwt() {
 }
 volatile uint32_t last_cycle_cost = 0;
 volatile uint32_t value_invocations = 0;
+static uint16_t profile_sample_counter = 0;
 #endif
 
 __attribute__((hot)) void main_callback() {
@@ -60,7 +64,14 @@ __attribute__((hot)) void main_callback() {
     if (!dwt_ready) {
         init_dwt();
     }
-    const uint32_t start_cycles = DWT->CYCCNT;
+    bool profile_this_call = false;
+    uint32_t start_cycles = 0;
+    profile_sample_counter++;
+    if (profile_sample_counter >= FOC_PROFILE_SAMPLE_PERIOD) {
+        profile_sample_counter = 0;
+        profile_this_call = true;
+        start_cycles = DWT->CYCCNT;
+    }
     #endif
     #ifdef ENABLE_DT
     if (last_call != 0) {
@@ -79,26 +90,24 @@ __attribute__((hot)) void main_callback() {
         }
     }
     #ifdef FOC_PROFILE
-    last_cycle_cost = DWT->CYCCNT - start_cycles;
-    // <'++'/'+='/... expression of 'volatile'-qualified type is deprecated> - C++20
-    value_invocations = value_invocations + 1;
-    #if !defined(ENABLE_DT) && defined(MONITOR)
-    value_dt = last_cycle_cost;
-    #endif
+    if (profile_this_call) {
+        last_cycle_cost = DWT->CYCCNT - start_cycles;
+        // <'++'/'+='/... expression of 'volatile'-qualified type is deprecated> - C++20
+        value_invocations = value_invocations + FOC_PROFILE_SAMPLE_PERIOD;
+        #if !defined(ENABLE_DT) && defined(MONITOR)
+        value_dt = last_cycle_cost;
+        #endif
+    }
     #endif
 }
 
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
-    if (htim->Instance == TIM7) {
-        // <'++'/'+='/... expression of 'volatile'-qualified type is deprecated> - C++20
-        millis_k = millis_k + 1;
-    } else if (htim->Instance == TIM2) {
-        HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
-    } else if (htim->Instance == TIM4) {
-        #ifdef MONITOR
+void monitor_loop(millis current_t) {
+#ifdef MONITOR
+    static millis monitor_time = 0;
+    EACH_N(current_t, monitor_time, 1, {
         auto motor = get_motor();
-        auto encoder = motor->get_encoder();
-        auto inverter = static_cast<const VBInverter&>(motor->get_inverter());
+        const auto& encoder = motor->get_encoder();
+        const auto& inverter = static_cast<const VBInverter&>(motor->get_inverter());
         value_angle = motor->get_angle();
         value_velocity = motor->get_velocity();
         value_torque = motor->get_torque();
@@ -123,8 +132,17 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
             });
             motor->set_current_regulator_params(debug_I_kp, debug_I_ki);
         }
-        #endif
+    })
+#endif
+}
 
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+    if (htim->Instance == TIM7) {
+        // <'++'/'+='/... expression of 'volatile'-qualified type is deprecated> - C++20
+        millis_k = millis_k + 1;
+    } else if (htim->Instance == TIM2) {
+        HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
+    } else if (htim->Instance == TIM4) {
         main_callback();
     }
 }

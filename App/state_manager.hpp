@@ -204,12 +204,12 @@ public:
                     responses.append("ERROR: Unknown command\n\r");
                 }
                 else {
-                    // Apply limits dynamically in this session
-                    auto new_limits = motor->get_limits();
-                    new_limits.user_angle_offset = config_data.angle_offset;
-                    new_limits.user_position_lower_limit = config_data.min_angle;
-                    new_limits.user_position_upper_limit = config_data.max_angle;
-                    motor->set_limits(new_limits);
+                    // Apply runtime config dynamically in this session
+                    auto new_runtime_config = motor->get_runtime_config();
+                    new_runtime_config.user_angle_offset = config_data.angle_offset;
+                    new_runtime_config.user_position_lower_limit = config_data.min_angle;
+                    new_runtime_config.user_position_upper_limit = config_data.max_angle;
+                    motor->set_runtime_config(new_runtime_config);
                 }
             }
         }

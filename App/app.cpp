@@ -53,7 +53,7 @@ extern "C" {
 }
 //#pragma endregion
 
-#ifdef FOC_PROFILE
+#ifdef STACK_PROFILE
 extern uint32_t __StackLimit;
 extern uint32_t __StackTop;
 constexpr uint32_t STACK_CANARY = 0xDEADBEEF;
@@ -163,8 +163,8 @@ void create_motor(VBDriveConfig& config_data) {
             .max_output = VBDriveDefaults::MAX_VOLTAGE,
             .min_output = -VBDriveDefaults::MAX_VOLTAGE,
         },
-        // User-defined limits
-        DriveLimits {
+        // User-defined runtime config
+        DriveRuntimeConfig {
             .user_current_limit = value_or_default(config_data.max_current, NAN),
             .user_torque_limit = value_or_default(config_data.max_torque, NAN),
             .user_speed_limit = value_or_default(config_data.max_speed, NAN),
@@ -247,7 +247,7 @@ static void persist_pending_config_if_needed();
 static void reboot_to_bootloader_if_requested();
 
 void app() {
-#ifdef FOC_PROFILE
+#ifdef STACK_PROFILE
     mark_stack();
 #endif
 //#pragma region StartupConfiguration
@@ -299,7 +299,7 @@ void app() {
 
     HAL_TIM_Base_Start_IT(&htim4);
 
-    #ifdef FOC_PROFILE
+    #ifdef STACK_PROFILE
     static millis stack_measurement_time = 0;
     #endif
     static millis logging_time = 0;
@@ -312,7 +312,8 @@ void app() {
         }
 
         millis current_time = millis_32();
-        #ifdef FOC_PROFILE
+        monitor_loop(current_time);
+        #ifdef STACK_PROFILE
         EACH_N(current_time, stack_measurement_time, 100, {
             measure_stack_usage();
         })
@@ -376,13 +377,13 @@ static void reboot_to_bootloader_if_requested() {
 }
 
 static bool update_persistent_float_register(
-    float DriveLimits::* limits_field,
+    float DriveRuntimeConfig::* runtime_config_field,
     ConfigFloatSetter config_setter,
     float value
 ) {
-    DriveLimits limits = motor->get_limits();
-    limits.*limits_field = value;
-    if (!motor->set_limits(limits)) {
+    DriveRuntimeConfig runtime_config = motor->get_runtime_config();
+    runtime_config.*runtime_config_field = value;
+    if (!motor->set_runtime_config(runtime_config)) {
         return false;
     }
 
@@ -545,12 +546,12 @@ void setup_subscriptions() {
     const auto node_id = get_app_manager().get_node_id();
     auto make_persistent_float_register = [](
         const char* name,
-        float DriveLimits::* limits_field,
+        float DriveRuntimeConfig::* runtime_config_field,
         ConfigFloatSetter config_setter
     ) -> RegisterDefinition {
         return {
             name,
-            [limits_field, config_setter](
+            [runtime_config_field, config_setter](
                 const uavcan_register_Value_1_0& v_in,
                 uavcan_register_Value_1_0& v_out,
                 RegisterAccessResponse& response
@@ -558,13 +559,13 @@ void setup_subscriptions() {
                 if (v_in._tag_ != REGISTER_EMPTY_TAG) {
                     float value = 0.0f;
                     if (parse_register_real32(v_in, value)) {
-                        update_persistent_float_register(limits_field, config_setter, value);
+                        update_persistent_float_register(runtime_config_field, config_setter, value);
                     }
                 }
 
                 response.persistent = true;
                 response._mutable = true;
-                fill_register_real32(v_out, motor->get_limits().*limits_field);
+                fill_register_real32(v_out, motor->get_runtime_config().*runtime_config_field);
             }
         };
     };
@@ -679,32 +680,32 @@ void setup_subscriptions() {
             },
             make_persistent_float_register(
                 "limit.current",
-                &DriveLimits::user_current_limit,
+                &DriveRuntimeConfig::user_current_limit,
                 [](VBDriveConfig& config, float value) { config.max_current = value; }
             ),
             make_persistent_float_register(
                 "limit.torque",
-                &DriveLimits::user_torque_limit,
+                &DriveRuntimeConfig::user_torque_limit,
                 [](VBDriveConfig& config, float value) { config.max_torque = value; }
             ),
             make_persistent_float_register(
                 "limit.speed",
-                &DriveLimits::user_speed_limit,
+                &DriveRuntimeConfig::user_speed_limit,
                 [](VBDriveConfig& config, float value) { config.max_speed = value; }
             ),
             make_persistent_float_register(
                 "limit.min_angle",
-                &DriveLimits::user_position_lower_limit,
+                &DriveRuntimeConfig::user_position_lower_limit,
                 [](VBDriveConfig& config, float value) { config.min_angle = value; }
             ),
             make_persistent_float_register(
                 "limit.max_angle",
-                &DriveLimits::user_position_upper_limit,
+                &DriveRuntimeConfig::user_position_upper_limit,
                 [](VBDriveConfig& config, float value) { config.max_angle = value; }
             ),
             make_persistent_float_register(
                 "angle.offset",
-                &DriveLimits::user_angle_offset,
+                &DriveRuntimeConfig::user_angle_offset,
                 [](VBDriveConfig& config, float value) { config.angle_offset = value; }
             ),
             {
