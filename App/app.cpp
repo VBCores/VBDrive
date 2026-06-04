@@ -35,7 +35,23 @@
 #include <voltbro/utils.hpp>
 //#pragma endregion
 
-static constexpr CanardNodeID UNCONFIGURED_SETUP_NODE_ID = 126;
+static constexpr uint32_t SETUP_NODE_ID_MAX = CANARD_NODE_ID_MAX - 1U;
+
+static CanardNodeID make_unconfigured_setup_node_id() {
+    uint32_t hash = 2166136261UL;
+    const uint32_t uid_words[3] = {
+        HAL_GetUIDw0(),
+        HAL_GetUIDw1(),
+        HAL_GetUIDw2()
+    };
+    for (uint32_t word : uid_words) {
+        for (uint8_t byte_index = 0; byte_index < 4; byte_index++) {
+            hash ^= (word >> (byte_index * 8U)) & 0xFFU;
+            hash *= 16777619UL;
+        }
+    }
+    return static_cast<CanardNodeID>(1U + (hash % SETUP_NODE_ID_MAX));
+}
 
 //#pragma region ExternConfiguration
 #define NANOPRINTF_IMPLEMENTATION
@@ -126,7 +142,7 @@ VBDrive* get_motor() {
 }
 
 static int8_t config_angle_direction(const VBDriveConfig& config_data) {
-    if (config_data.max_voltage == -1.0f) {
+    if (config_data.angle_direction == -1) {
         return -1;
     }
     return 1;
@@ -265,10 +281,10 @@ void app() {
     if (!app_manager.is_app_running()) {
         // Bring up Cyphal even with blank EEPROM so config can be restored over CAN.
         if (config_data.node_id == 0) {
-            config_data.node_id = UNCONFIGURED_SETUP_NODE_ID;
+            config_data.node_id = make_unconfigured_setup_node_id();
         }
         start_cyphal();
-        set_cyphal_mode(uavcan_node_Mode_1_0_OPERATIONAL);
+        set_cyphal_mode(uavcan_node_Mode_1_0_MAINTENANCE);
         while (true) {
             cyphal_loop();
             persist_pending_config_if_needed();
@@ -418,8 +434,7 @@ static bool update_persistent_direction_register(int32_t value) {
     }
 
     auto& config = get_app_manager().get_config();
-    // Keep EEPROM layout stable: max_voltage is not used by VBDrive runtime.
-    config.max_voltage = static_cast<float>(value);
+    config.angle_direction = value;
     return request_config_save(config);
 }
 
@@ -509,7 +524,7 @@ public:
 
 // NOTE: underlying CanardRxSubscriptions are HUGE - 552 bytes each. C++ wrapper size is negligible in comparison
 ReservedObject<NodeInfoReader> node_info_reader;
-ReservedObject<RegistersHandler<24>> registers_handler;
+ReservedObject<RegistersHandler<22>> registers_handler;
 ReservedObject<FOCCommandSub> foc_command_sub;
 ReservedObject<SpecificControlSub> specific_control_sub;
 
@@ -626,7 +641,7 @@ void setup_subscriptions() {
     };
 
     registers_handler.create(
-        std::array<RegisterDefinition, 24>{{
+        std::array<RegisterDefinition, 22>{{
             {
                 "state.is_on",
                 [](
@@ -731,7 +746,7 @@ void setup_subscriptions() {
                 "node.id",
                 [](const VBDriveConfig& config) { return static_cast<uint32_t>(config.node_id); },
                 [](VBDriveConfig& config, uint32_t value) {
-                    if (value == 0 || value > 127) {
+                    if (value == 0 || value > CANARD_NODE_ID_MAX) {
                         return false;
                     }
                     config.node_id = static_cast<CanardNodeID>(value);
@@ -746,28 +761,6 @@ void setup_subscriptions() {
                         return false;
                     }
                     config.gear_ratio = static_cast<uint8_t>(value);
-                    return true;
-                }
-            ),
-            make_config_u32_register(
-                "config.nominal_baud",
-                [](const VBDriveConfig& config) { return static_cast<uint32_t>(config.fdcan_nominal_baud); },
-                [](VBDriveConfig& config, uint32_t value) {
-                    if (value > static_cast<uint32_t>(FDCANNominalBaud::KHz1000)) {
-                        return false;
-                    }
-                    config.fdcan_nominal_baud = static_cast<FDCANNominalBaud>(value);
-                    return true;
-                }
-            ),
-            make_config_u32_register(
-                "config.data_baud",
-                [](const VBDriveConfig& config) { return static_cast<uint32_t>(config.fdcan_data_baud); },
-                [](VBDriveConfig& config, uint32_t value) {
-                    if (value > static_cast<uint32_t>(FDCANDataBaud::KHz8000)) {
-                        return false;
-                    }
-                    config.fdcan_data_baud = static_cast<FDCANDataBaud>(value);
                     return true;
                 }
             ),

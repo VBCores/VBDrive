@@ -22,10 +22,9 @@ namespace VBDriveDefaults {
 }  // namespace VBDriveDefaults
 
 struct __attribute__((packed)) VBDriveConfig: public BaseConfigData {
-    static constexpr uint32_t TYPE_ID = 0x44AAABFE;
+    static constexpr uint32_t TYPE_ID = 0x44AAABFF;
     uint8_t gear_ratio = 0;
-    // NAN means not set
-    float max_voltage = NAN;
+    int32_t angle_direction = 1;
     float max_current = NAN;
     float max_torque = NAN;
     float max_speed = NAN;
