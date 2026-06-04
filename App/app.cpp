@@ -411,9 +411,9 @@ static bool update_persistent_direction_register(int32_t value) {
         return false;
     }
 
-    DriveLimits limits = motor->get_limits();
-    limits.user_angle_direction = static_cast<int8_t>(value);
-    if (!motor->set_limits(limits)) {
+    DriveRuntimeConfig runtime_config = motor->get_runtime_config();
+    runtime_config.user_angle_direction = static_cast<int8_t>(value);
+    if (!motor->set_runtime_config(runtime_config)) {
         return false;
     }
 
@@ -579,7 +579,7 @@ void setup_subscriptions() {
             [config_getter, config_setter](
                 const uavcan_register_Value_1_0& v_in,
                 uavcan_register_Value_1_0& v_out,
-                RegisterAccessResponse::Type& response
+                RegisterAccessResponse& response
             ) {
                 if (v_in._tag_ != REGISTER_EMPTY_TAG) {
                     float value = 0.0f;
@@ -604,7 +604,7 @@ void setup_subscriptions() {
             [config_getter, config_setter](
                 const uavcan_register_Value_1_0& v_in,
                 uavcan_register_Value_1_0& v_out,
-                RegisterAccessResponse::Type& response
+                RegisterAccessResponse& response
             ) {
                 if (v_in._tag_ != REGISTER_EMPTY_TAG) {
                     uint32_t value = 0;
@@ -664,7 +664,7 @@ void setup_subscriptions() {
                 [](
                     const uavcan_register_Value_1_0& v_in,
                     uavcan_register_Value_1_0& v_out,
-                    RegisterAccessResponse::Type& response
+                    RegisterAccessResponse& response
                 ){
                     if (v_in._tag_ != REGISTER_EMPTY_TAG) {
                         bool value = false;
@@ -713,7 +713,7 @@ void setup_subscriptions() {
                 [](
                     const uavcan_register_Value_1_0& v_in,
                     uavcan_register_Value_1_0& v_out,
-                    RegisterAccessResponse::Type& response
+                    RegisterAccessResponse& response
                 ){
                     if (v_in._tag_ != REGISTER_EMPTY_TAG) {
                         int32_t value = 0;
@@ -724,7 +724,7 @@ void setup_subscriptions() {
 
                     response.persistent = true;
                     response._mutable = true;
-                    fill_register_integer32(v_out, motor->get_limits().user_angle_direction);
+                    fill_register_integer32(v_out, motor->get_runtime_config().user_angle_direction);
                 }
             },
             make_config_u32_register(
