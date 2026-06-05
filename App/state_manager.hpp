@@ -3,6 +3,8 @@
 #include <voltbro/config/serial/serial.h>
 #include <voltbro/motors/bldc/vbdrive/vbdrive.hpp>
 
+#include <cstddef>
+
 VBDrive* get_motor();
 void reboot_to_bootloader();
 
@@ -21,8 +23,10 @@ namespace VBDriveDefaults {
     inline constexpr float I_LPF = 0.0925f;
 }  // namespace VBDriveDefaults
 
+inline constexpr uint32_t VBDRIVE_CONFIG_TYPE_ID = 0x44AAABFF;
+
 struct __attribute__((packed)) VBDriveConfig: public BaseConfigData {
-    static constexpr uint32_t TYPE_ID = 0x44AAABFF;
+    static constexpr uint32_t TYPE_ID = VBDRIVE_CONFIG_TYPE_ID;
     uint8_t gear_ratio = 0;
     int32_t angle_direction = 1;
     float max_current = NAN;
@@ -47,16 +51,23 @@ struct __attribute__((packed)) VBDriveConfig: public BaseConfigData {
         angle_encoder = AngleEncoderType::ROTOR;
     }
 
-    bool are_required_params_set() override;
+    bool are_required_params_set();
 
     void print_self(UARTResponseAccumulator& responses);
     void get(const std::string& param, UARTResponseAccumulator& responses);
     bool set(const std::string& param, std::string& value, UARTResponseAccumulator& responses);
 };
 
-constexpr size_t CALIBRATION_PLACEMENT = 0;
-constexpr size_t CONFIG_PLACEMENT = CALIBRATION_PLACEMENT + sizeof(CalibrationData) + 1;
-constexpr size_t IND_SENSOR_STATE_PLACEMENT = CONFIG_PLACEMENT + sizeof(VBDriveConfig) + 1;
+static_assert(sizeof(BaseConfigData) == 8);
+static_assert(offsetof(BaseConfigData, was_configured) == 0);
+static_assert(offsetof(BaseConfigData, node_id) == 1);
+static_assert(offsetof(BaseConfigData, fdcan_nominal_baud) == 2);
+static_assert(offsetof(BaseConfigData, fdcan_data_baud) == 3);
+static_assert(offsetof(BaseConfigData, type_id) == 4);
+
+constexpr size_t CONFIG_PLACEMENT = 0;
+constexpr size_t CALIBRATION_PLACEMENT = CONFIG_PLACEMENT + sizeof(VBDriveConfig) + 1;
+constexpr size_t IND_SENSOR_STATE_PLACEMENT = CALIBRATION_PLACEMENT + sizeof(CalibrationData) + 1;
 
 struct CommandState: AppState {
     static constexpr AppStateT NOT_CALIBRATED{4};

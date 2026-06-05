@@ -5,12 +5,6 @@
 #include <cmath>
 
 #define BOOT_REQUEST_MAGIC          0xB00710ADUL
-#define BOOT_CFG_NODE_ID_MASK       0x7FFUL
-#define BOOT_CFG_NOMINAL_SHIFT      11U
-#define BOOT_CFG_DATA_SHIFT         19U
-#define BOOT_CFG_FD_MODE_BIT        27U
-#define BOOT_CFG_BITRATE_SWITCH_BIT 28U
-
 constexpr auto make_action(auto f1, auto f2) {
     return std::make_tuple(
         std::function<bool()>(f1),
@@ -51,15 +45,6 @@ static void boot_request_access_disable() {
     HAL_PWR_DisableBkUpAccess();
 }
 
-static uint32_t boot_request_pack(uint32_t node_id, uint8_t nominal_prescaler, uint8_t data_prescaler) {
-    uint32_t packed = node_id & BOOT_CFG_NODE_ID_MASK;
-    packed |= ((uint32_t)nominal_prescaler << BOOT_CFG_NOMINAL_SHIFT);
-    packed |= ((uint32_t)data_prescaler << BOOT_CFG_DATA_SHIFT);
-    packed |= (1UL << BOOT_CFG_FD_MODE_BIT);
-    packed |= (1UL << BOOT_CFG_BITRATE_SWITCH_BIT);
-    return packed;
-}
-
 void reboot_to_bootloader() {
     auto motor = get_motor();
 
@@ -72,11 +57,7 @@ void reboot_to_bootloader() {
 
     boot_request_access_enable();
     TAMP->BKP0R = BOOT_REQUEST_MAGIC;
-    TAMP->BKP1R = boot_request_pack(
-        drive_state_controller.get_node_id(),
-        drive_state_controller.get_nom_prescaler(),
-        drive_state_controller.get_data_prescaler()
-    );
+    TAMP->BKP1R = 0U;
     TAMP->BKP2R = 0U;
     boot_request_access_disable();
 
