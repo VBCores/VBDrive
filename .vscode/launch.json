@@ -5,7 +5,11 @@
             "name": "Debug Microcontroller - STLink-V2",
             "cwd": "${workspaceFolder}",        //Path from where commands are executed
             "type": "cortex-debug",             //Debug
-            "executable": "${command:cmake.launchTargetPath}", //or fixed file path: build/project-name.elf
+            "executable": "${command:cmake.launchTargetPath}", //App ELF is used for debug symbols
+            "loadFiles": [
+                "${command:cmake.buildDirectory}/VBDrive_full.hex"
+            ],                                  //Flash bootloader + app, not only VBDrive.elf
+            "preLaunchTask": "Build full firmware image",
             "request": "launch",                //Use "attach" to connect to target w/o elf download
             "servertype": "stlink",             //Use stlink setup of cortex-M debug
             "device": "STM32G474RET6",            //MCU used

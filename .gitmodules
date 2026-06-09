@@ -10,3 +10,6 @@
 [submodule "Drivers/cyphal_types/voltbro"]
 	path = Drivers/cyphal_types/voltbro
 	url = git@github.com:voltbro/cyphal-types.git
+[submodule "VBBoot"]
+	path = VBBoot
+	url = git@github.com:VBCores/VBBoot.git
