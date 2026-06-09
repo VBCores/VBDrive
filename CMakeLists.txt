@@ -36,6 +36,7 @@ set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES
 )
 add_compile_definitions(
     -DUSE_HAL_DRIVER
+    -DSTM32G
     -DSTM32G4
     -DARM_MATH_CM4
 )
