@@ -35,6 +35,7 @@ The board uses a UART-based serial interface for configuration, calibration, tes
 | `SAVE` | CONFIG | Persist updated config to EEPROM (if changed), exit config mode, start motor |
 | `RESET` | CONFIG | Load default config values in RAM (does NOT affect current session - requires `SAVE` or `APPLY` to persist) |
 | `APPLY` | Any non-TEST state | Persist updated config (if changed) and reboot |
+| `BOOT` | Any state | Write bootloader request magic and reboot into VBBoot |
 | `CALIBRATE` | RUNNING, NOT_CALIBRATED | Run calibration action |
 | `TEST` | RUNNING | Enter test mode |
 | `STOP` | TEST | Exit test mode, clear FOC target, stop test logging |
@@ -63,8 +64,8 @@ The board uses a UART-based serial interface for configuration, calibration, tes
 | `i_lpf`    | Current low-pass filter coefficient                       | Float   | `0.1`          |
 | `ang_enc`  | Angle encoder type enum, 0 rotor, 1 - shaft               | Integer | `0`, `1`.      |
 | `node_id`  | Cyphal/CAN node ID                                        | Integer | `1`, `42`      |
-| `d_baud`   | FDCAN data baud rate enum (see below)                     | Enum    | `0`, `1`, `2`  |
-| `n_baud`   | FDCAN nominal baud rate enum (see below)                  | Enum    | `3`, `4`       |
+| `d_baud`   | FDCAN data baud rate enum (serial/EEPROM only, see below) | Enum    | `0`, `1`, `2`  |
+| `n_baud`   | FDCAN nominal baud rate enum (serial/EEPROM only, see below) | Enum | `3`, `4`       |
 
 ---
 
@@ -82,6 +83,8 @@ The board uses a UART-based serial interface for configuration, calibration, tes
 |                     | `KHz2000`  | 2 MHz    | `1`           |
 |                     | `KHz4000`  | 4 MHz    | `2`           |
 |                     | `KHz8000`  | 8 MHz    | `3`           |
+
+`n_baud` and `d_baud` are intentionally configurable only through the UART/EEPROM path. They are not exposed as Cyphal registers, because changing the CAN timing through the same CAN transport can make the node disappear from the bus.
 
 ---
 
@@ -101,9 +104,9 @@ The board uses a UART-based serial interface for configuration, calibration, tes
 
 When logging is enabled in TEST mode, UART periodically prints:
 
-* `rotor sensor: <u16>`
-* `shaft sensor: <u16>`
-* `shaft angle : <float>`
+```text
+rotor: <u16> shaft :<u16> angle: <float> velocity: <float>
+```
 
 ---
 
@@ -112,6 +115,7 @@ When logging is enabled in TEST mode, UART periodically prints:
 * **Success**: `OK: <param>:<value>` (set operations)
 * **Error**: `ERROR: Unknown command`, `ERROR: Unknown parameter`, `ERROR: Invalid value`
 * **Config persistence**: UART configuration settings are written to EEPROM on `SAVE`/`APPLY` (not on every `SET`)
+* **Bootloader entry**: `BOOT` writes only the bootloader request magic. VBBoot reads `node_id`, `n_baud`, and `d_baud` from the EEPROM config prefix.
 
 ---
 
@@ -168,16 +172,32 @@ The BLDC Motor Controller communicates over **Cyphal/FDCAN** to publish real-tim
 
 ### **Registers**
 
-| Register Name     | Type        | Persistence | Description                          |
-| -------------     | ----        | ----------- | -----------                          |
-| `state.is_on`     | `bool`      | Runtime     | Turns underlying motor driver on/off |
-| `state.errors`    | `natural32` | Runtime     | Invalid Cyphal command counter       |
-| `limit.current`   | `real32`    | EEPROM      | Current limit in amperes             |
-| `limit.torque`    | `real32`    | EEPROM      | Torque limit in N m                  |
-| `limit.speed`     | `real32`    | EEPROM      | Speed limit in rad/s                 |
-| `limit.min_angle` | `real32`    | EEPROM      | Lower joint angle limit in rad       |
-| `limit.max_angle` | `real32`    | EEPROM      | Upper joint angle limit in rad       |
-| `angle.offset`    | `real32`    | EEPROM      | Joint angle offset in rad            |
+| Register Name           | Type        | Persistence | Description |
+| -------------           | ----        | ----------- | ----------- |
+| `state.is_on`           | `bit`       | Runtime     | Turns the motor driver on/off |
+| `state.errors`          | `natural32` | Runtime     | Invalid Cyphal command counter |
+| `command.bootloader`    | `bit`       | Runtime     | Reboot request into VBBoot when written as true |
+| `limit.current`         | `real32`    | EEPROM      | Current limit in amperes |
+| `limit.torque`          | `real32`    | EEPROM      | Torque limit in N m |
+| `limit.speed`           | `real32`    | EEPROM      | Speed limit in rad/s |
+| `limit.min_angle`       | `real32`    | EEPROM      | Lower joint angle limit in rad |
+| `limit.max_angle`       | `real32`    | EEPROM      | Upper joint angle limit in rad |
+| `angle.offset`          | `real32`    | EEPROM      | Joint angle offset in rad |
+| `angle.direction`       | `integer32` | EEPROM      | Joint angle direction multiplier |
+| `node.id`               | `natural32` | EEPROM      | Cyphal node ID |
+| `config.gear`           | `natural32` | EEPROM      | Gear ratio |
+| `config.angle_encoder`  | `natural32` | EEPROM      | Angle encoder enum, 0 rotor, 1 shaft |
+| `motor.torque_constant` | `real32`    | EEPROM      | Torque constant in N m/A |
+| `foc.kp`                | `real32`    | EEPROM      | Current proportional gain |
+| `foc.ki`                | `real32`    | EEPROM      | Current integral gain |
+| `foc.kd`                | `real32`    | EEPROM      | Current derivative gain |
+| `filter.a`              | `real32`    | EEPROM      | Main filter parameter A |
+| `filter.g1`             | `real32`    | EEPROM      | Filter gain 1 |
+| `filter.g2`             | `real32`    | EEPROM      | Filter gain 2 |
+| `filter.g3`             | `real32`    | EEPROM      | Filter gain 3 |
+| `filter.i_lpf`          | `real32`    | EEPROM      | Current low-pass filter coefficient |
+
+Persistent register writes are queued and saved to EEPROM from the main loop. The config starts at EEPROM offset `0`, so VBBoot can read the shared C-compatible prefix containing `node_id`, `n_baud`, and `d_baud`. If the app does not have a complete EEPROM config yet, it starts Cyphal in maintenance mode with a deterministic setup node ID derived from the MCU UID.
 
 ### **Angle Frame Semantics**
 
