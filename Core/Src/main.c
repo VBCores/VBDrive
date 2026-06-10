@@ -39,7 +39,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define FLASH_BASE 0x08000000
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -72,7 +72,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+  SCB->VTOR = (FLASH_BASE + 0x3000);
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/

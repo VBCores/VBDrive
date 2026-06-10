@@ -7,13 +7,13 @@
 
 #include <voltbro/utils.hpp>
 
-#include <uavcan/diagnostic/Record_1_1.h>
-#include <uavcan/node/Heartbeat_1_0.h>
-#include <uavcan/node/Health_1_0.h>
-#include <uavcan/node/Mode_1_0.h>
+#include <uavcan/diagnostic/Record_1_1.hpp>
+#include <uavcan/node/Heartbeat_1_0.hpp>
+#include <uavcan/node/Health_1_0.hpp>
+#include <uavcan/node/Mode_1_0.hpp>
 
-TYPE_ALIAS(DiagnosticRecord, uavcan_diagnostic_Record_1_1)
-TYPE_ALIAS(HBeat, uavcan_node_Heartbeat_1_0)
+using DiagnosticRecord = uavcan_diagnostic_Record_1_1;
+using HBeat = uavcan_node_Heartbeat_1_0;
 
 static uint8_t CYPHAL_HEALTH_STATUS = uavcan_node_Health_1_0_NOMINAL;
 static uint8_t CYPHAL_MODE = uavcan_node_Mode_1_0_INITIALIZATION;
@@ -38,15 +38,15 @@ void restart_cyphal() {
     cyphal_interface->clear_queue();
 
     static CanardTransferID record_transfer_id = 0;
-    DiagnosticRecord::Type record;
+    DiagnosticRecord record;
     record.severity.value = uavcan_diagnostic_Severity_1_0_ERROR;
     sprintf(reinterpret_cast<char*>(record.text.elements), "cyphal_error_handler was called internally");
     record.text.count = strlen((char*)record.text.elements);
 
-    cyphal_interface->send_msg<DiagnosticRecord>(
-            &record,
-            uavcan_diagnostic_Record_1_1_FIXED_PORT_ID_,
-            &record_transfer_id
+    cyphal_interface->send_msg(
+        &record,
+        uavcan_diagnostic_Record_1_1_FIXED_PORT_ID_,
+        &record_transfer_id
     );
 
     delay_cyphal_until_millis = 0;
@@ -57,7 +57,7 @@ UtilityConfig utilities(micros_64, cyphal_error_handler);
 
 void heartbeat() {
     static CanardTransferID hbeat_transfer_id = 0;
-    HBeat::Type heartbeat_msg = {
+    HBeat heartbeat_msg = {
         .uptime = (uint32_t)std::floor(millis_32() / 1000.0f),
         .health = {CYPHAL_HEALTH_STATUS},
         .mode = {CYPHAL_MODE},
@@ -65,7 +65,7 @@ void heartbeat() {
     };
 
     if (_is_cyphal_on) {
-        cyphal_interface->send_msg<HBeat>(
+        cyphal_interface->send_msg(
             &heartbeat_msg,
             uavcan_node_Heartbeat_1_0_FIXED_PORT_ID_,
             &hbeat_transfer_id,
@@ -74,7 +74,7 @@ void heartbeat() {
     }
 }
 
-__attribute__((hot, flatten)) void cyphal_loop() {
+__attribute__((hot)) void cyphal_loop() {
     if (_is_cyphal_on) {
         cyphal_interface->loop();
     }

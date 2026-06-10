@@ -16,6 +16,16 @@
             }
         },
         {
+            "type": "cppbuild",
+            "label": "Build full firmware image",
+            "command": "cmake",
+            "args": ["--build", "${command:cmake.buildDirectory}", "--target", "VBDrive_full_hex", "-j", "8"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": ["$gcc"],
+        },
+        {
             "type": "shell",
             "label": "Re-build project",
             "command": "cmake",

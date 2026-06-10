@@ -1,6 +1,7 @@
 NOTES.*
 scratch.ipynb
 compile_commands.json
+var/
 
 # Local keys
 *.pub

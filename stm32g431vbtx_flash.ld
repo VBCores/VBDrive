@@ -73,7 +73,7 @@ __StackLimit = __StackTop - _Min_Stack_Size;
 MEMORY
 {
 RAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 32K
-FLASH (rx)      : ORIGIN = 0x8000000, LENGTH = 128K
+FLASH (rx)      : ORIGIN = 0x08003000, LENGTH = 128K - 12K
 }
 
 /* Define output sections */

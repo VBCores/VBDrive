@@ -31,6 +31,7 @@ void in_loop_reporting(millis);
 void setup_subscriptions();
 void cyphal_loop();
 void start_cyphal();
+void monitor_loop(millis);
 void set_cyphal_mode(uint8_t mode);
 
 // common.cpp
@@ -52,6 +53,7 @@ extern FDCAN_HandleTypeDef hfdcan1;
 // state_manager.cpp
 DriveStateController& get_app_manager();
 void configure_fdcan(FDCAN_HandleTypeDef*);
+void reboot_to_bootloader();
 
 template <typename T>
 inline T value_or_default(T value, T default_value) {

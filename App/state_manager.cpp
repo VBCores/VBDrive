@@ -4,6 +4,7 @@
 
 #include <cmath>
 
+#define BOOT_REQUEST_MAGIC          0xB00710ADUL
 constexpr auto make_action(auto f1, auto f2) {
     return std::make_tuple(
         std::function<bool()>(f1),
@@ -33,6 +34,35 @@ DriveStateController drive_state_controller(
 
 DriveStateController& get_app_manager() {
     return drive_state_controller;
+}
+
+static void boot_request_access_enable() {
+    __HAL_RCC_PWR_CLK_ENABLE();
+    HAL_PWR_EnableBkUpAccess();
+}
+
+static void boot_request_access_disable() {
+    HAL_PWR_DisableBkUpAccess();
+}
+
+void reboot_to_bootloader() {
+    auto motor = get_motor();
+
+    if (motor != nullptr) {
+        motor->set_foc_point(FOCTarget{0});
+        motor->stop();
+    }
+
+    (void)HAL_FDCAN_Stop(&hfdcan1);
+
+    boot_request_access_enable();
+    TAMP->BKP0R = BOOT_REQUEST_MAGIC;
+    TAMP->BKP1R = 0U;
+    TAMP->BKP2R = 0U;
+    boot_request_access_disable();
+
+    HAL_Delay(50);
+    NVIC_SystemReset();
 }
 
 static constexpr uint16_t UART_RX_BUFFER_SIZE = 32;
