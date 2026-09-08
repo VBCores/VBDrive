@@ -4,7 +4,46 @@
 
 #include <cmath>
 
-#define BOOT_REQUEST_MAGIC          0xB00710ADUL
+static constexpr size_t PARSED_VALUE_MAX_SIZE = 31;
+
+bool parse_serial_number(std::string_view str, int& out_val) {
+    if (str.empty()) return false;
+    if (str.size() > PARSED_VALUE_MAX_SIZE) return false;
+
+    char buffer[PARSED_VALUE_MAX_SIZE + 1];
+    memcpy(buffer, str.data(), str.size());
+    buffer[str.size()] = '\0';
+
+    char* endptr = nullptr;
+    long val = strtol(buffer, &endptr, 10);
+
+    // Check for conversion errors
+    if (endptr != buffer + str.size()) return false;
+    if (val < INT32_MIN || val > INT32_MAX) return false;
+
+    out_val = static_cast<int>(val);
+    return true;
+}
+
+bool parse_serial_number(std::string_view str, float& out_val) {
+    if (str.empty()) return false;
+    if (str.size() > PARSED_VALUE_MAX_SIZE) return false;
+
+    char buffer[PARSED_VALUE_MAX_SIZE + 1];
+    memcpy(buffer, str.data(), str.size());
+    buffer[str.size()] = '\0';
+
+    char* endptr = nullptr;
+    float val = strtof(buffer, &endptr);
+
+    if (endptr != buffer + str.size()) return false;
+    if (val == HUGE_VALF || val == -HUGE_VALF) return false;
+
+    out_val = val;
+    return true;
+}
+
+
 constexpr auto make_action(auto f1, auto f2) {
     return std::make_tuple(
         std::function<bool()>(f1),
@@ -36,6 +75,7 @@ DriveStateController& get_app_manager() {
     return drive_state_controller;
 }
 
+#define BOOT_REQUEST_MAGIC 0xB00710ADUL
 static void boot_request_access_enable() {
     __HAL_RCC_PWR_CLK_ENABLE();
     HAL_PWR_EnableBkUpAccess();
@@ -66,10 +106,9 @@ void reboot_to_bootloader() {
 }
 
 static constexpr uint16_t UART_RX_BUFFER_SIZE = 32;
-static char uart_rx_buffer[UART_RX_BUFFER_SIZE + 1];
+static char uart_rx_buffer[UART_RX_BUFFER_SIZE];
 
 void start_uart_recv_it() {
-    std::memset(uart_rx_buffer, '\0', UART_RX_BUFFER_SIZE + 1);
     /*
     / If TX uses DMA, next line is not needed,
     / if TX is IT or direct, next line is required due to bug in HAL.
@@ -82,8 +121,9 @@ void start_uart_recv_it() {
         UART_RX_BUFFER_SIZE
     );
     if (status != HAL_OK) {
-        // TODO
+        Error_Handler();
     }
+    __HAL_DMA_DISABLE_IT(huart2.hdmarx, DMA_IT_HT);
 }
 
 #pragma GCC diagnostic push
@@ -91,10 +131,7 @@ void start_uart_recv_it() {
 // NOTE: huart parameter required by the interface, but not used in this implementation
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef* huart, uint16_t size) {
 #pragma GCC diagnostic pop
-    uart_rx_buffer[size] = '\0';
-    auto command_string = std::string(uart_rx_buffer);
-
-    drive_state_controller.process_command(command_string);
+    drive_state_controller.process_command(std::string_view(uart_rx_buffer, size));
     drive_state_controller.wait_for_uart();
     start_uart_recv_it();
 }
@@ -129,155 +166,92 @@ bool VBDriveConfig::are_required_params_set() {
     return BaseConfigData::are_required_params_set() && gear_ratio != 0;
 }
 
-static constexpr std::string GEAR_RATIO_PARAM = "gear";
-static constexpr std::string MAX_CURRENT_PARAM = "max_i";
-static constexpr std::string MAX_SPEED_PARAM = "max_spd";
-static constexpr std::string MAX_TORQUE_PARAM = "max_tq";
-static constexpr std::string ANGLE_OFFSET_PARAM = "ang_off";
-static constexpr std::string MIN_ANGLE_PARAM = "min_ang";
-static constexpr std::string MAX_ANGLE_PARAM = "max_ang";
-static constexpr std::string TORQUE_CONST_PARAM = "kt";
-static constexpr std::string KP_PARAM = "kp";
-static constexpr std::string KI_PARAM = "ki";
-static constexpr std::string KD_PARAM = "kd";
-static constexpr std::string FILTER_A_PARAM = "flt_a";
-static constexpr std::string FILTER_G1_PARAM = "flt_g1";
-static constexpr std::string FILTER_G2_PARAM = "flt_g2";
-static constexpr std::string FILTER_G3_PARAM = "flt_g3";
-static constexpr std::string FILTER_I_LPF_PARAM = "i_lpf";
-static constexpr std::string ANGLE_ENCODER_PARAM = "ang_enc";
-
 void VBDriveConfig::print_self(UARTResponseAccumulator& responses) {
-    get(GEAR_RATIO_PARAM, responses);
-    get(MAX_CURRENT_PARAM, responses);
-    get(MAX_SPEED_PARAM, responses);
-    get(MAX_TORQUE_PARAM, responses);
-    get(ANGLE_OFFSET_PARAM, responses);
-    get(MIN_ANGLE_PARAM, responses);
-    get(MAX_ANGLE_PARAM, responses);
-    get(TORQUE_CONST_PARAM, responses);
-    get(KP_PARAM, responses);
-    get(KI_PARAM, responses);
-    get(KD_PARAM, responses);
-    get(FILTER_A_PARAM, responses);
-    get(FILTER_G1_PARAM, responses);
-    get(FILTER_G2_PARAM, responses);
-    get(FILTER_G3_PARAM, responses);
-    get(FILTER_I_LPF_PARAM, responses);
-    get(NODE_ID_PARAM, responses);
-    get(FDCAN_DATA_PARAM, responses);
-    get(FDCAN_NOMINAL_PARAM, responses);
-    get(ANGLE_ENCODER_PARAM, responses);
+    for (const auto& definition : PARAMETER_CATALOG) {
+        if (definition.is_persistent) {
+            get(definition.name, responses);
+        }
+    }
     responses.append("was configured:%s\n\r", was_configured ? "true" : "false");
     responses.append("are all required params set: %s\n\r", are_required_params_set() ? "true" : "false");
 }
 
-void VBDriveConfig::get(const std::string& param, UARTResponseAccumulator& responses) {
-    if (get_base_params(this, param, responses)) {
+void VBDriveConfig::get(std::string_view param, UARTResponseAccumulator& responses) {
+    const auto* definition = find_parameter(param);
+    if (!definition) {
+        responses.append("ERROR: Unknown parameter\n\r");
         return;
     }
-    if (param == GEAR_RATIO_PARAM) {
-        responses.append("gear:%u\n\r", value_or_default(gear_ratio, VBDriveDefaults::GEAR_RATIO, static_cast<uint8_t>(0)));
+    ParameterValue value{};
+    if (!read_parameter(*this, definition->id, value)) {
+        responses.append("ERROR: Parameter unavailable\n\r");
+        return;
     }
-    else if (param == MAX_CURRENT_PARAM) {
-        responses.append("max_i:%f\n\r", value_or_default(max_current, NAN));
-    }
-    else if (param == MAX_SPEED_PARAM) {
-        responses.append("max_spd:%f\n\r", value_or_default(max_speed, NAN));
-    }
-    else if (param == MAX_TORQUE_PARAM) {
-        responses.append("max_tq:%f\n\r", value_or_default(max_torque, NAN));
-    }
-    else if (param == ANGLE_OFFSET_PARAM) {
-        responses.append("ang_off:%f\n\r", value_or_default(angle_offset, VBDriveDefaults::ANGLE_OFFSET));
-    }
-    else if (param == MIN_ANGLE_PARAM) {
-        responses.append("min_ang:%f\n\r", value_or_default(min_angle, NAN));
-    }
-    else if (param == MAX_ANGLE_PARAM) {
-        responses.append("max_ang:%f\n\r", value_or_default(max_angle, NAN));
-    }
-    else if (param == TORQUE_CONST_PARAM) {
-        responses.append("kt:%f\n\r", value_or_default(torque_const, VBDriveDefaults::TORQUE_CONST));
-    }
-    else if (param == KI_PARAM) {
-        responses.append("ki:%f\n\r", value_or_default(ki, VBDriveDefaults::PID_KI));
-    }
-    else if (param == KP_PARAM) {
-        responses.append("kp:%f\n\r", value_or_default(kp, VBDriveDefaults::PID_KP));
-    }
-    else if (param == KD_PARAM) {
-        responses.append("kd:%f\n\r", value_or_default(kd, VBDriveDefaults::PID_KD));
-    }
-    else if (param == FILTER_A_PARAM) {
-        responses.append("flt_a:%f\n\r", value_or_default(filter_a, VBDriveDefaults::FILTER_A));
-    }
-    else if (param == FILTER_G1_PARAM) {
-        responses.append("flt_g1:%f\n\r", value_or_default(filter_g1, VBDriveDefaults::FILTER_G1));
-    }
-    else if (param == FILTER_G2_PARAM) {
-        responses.append("flt_g2:%f\n\r", value_or_default(filter_g2, VBDriveDefaults::FILTER_G2));
-    }
-    else if (param == FILTER_G3_PARAM) {
-        responses.append("flt_g3:%f\n\r", value_or_default(filter_g3, VBDriveDefaults::FILTER_G3));
-    }
-    else if (param == FILTER_I_LPF_PARAM) {
-        responses.append("i_lpf:%f\n\r", value_or_default(I_lpf_coefficient, VBDriveDefaults::I_LPF));
-    }
-    else if (param == ANGLE_ENCODER_PARAM) {
-        responses.append("ang_enc:%u\n\r", to_underlying(angle_encoder));
-    }
-    else {
-        responses.append("ERROR: Unknown parameter\n\r");
+    switch (definition->type) {
+        case ParameterType::REAL32:
+            responses.append("%s:%f\n\r", definition->name.data(), std::get<float>(value));
+            break;
+        case ParameterType::NATURAL32:
+            responses.append("%s:%lu\n\r", definition->name.data(), std::get<uint32_t>(value));
+            break;
+        case ParameterType::INTEGER32:
+            responses.append("%s:%ld\n\r", definition->name.data(), std::get<int32_t>(value));
+            break;
+        case ParameterType::BIT:
+            responses.append("%s:%u\n\r", definition->name.data(), std::get<bool>(value) ? 1U : 0U);
+            break;
+        case ParameterType::STRING:
+            responses.append("%s:%.*s\n\r", definition->name.data(), static_cast<int>(std::get<std::string_view>(value).size()), std::get<std::string_view>(value).data());
+            break;
     }
 }
 
-bool VBDriveConfig::set(const std::string& param, std::string& value, UARTResponseAccumulator& responses) {
-    bool was_found = false;
-    bool result = set_base_params(this, param, value, responses, was_found);
-    if (was_found) {
-        return result;
+bool VBDriveConfig::set(std::string_view param, std::string_view input, UARTResponseAccumulator& responses, bool apply_runtime) {
+    const auto* definition = find_parameter(param);
+    if (!definition) {
+        responses.append("ERROR: Unknown parameter\n\r");
+        return false;
+    }
+    if (!definition->is_persistent) {
+        responses.append(definition->is_mutable
+            ? "ERROR: Parameter unavailable\n\r"
+            : "ERROR: Read-only parameter\n\r");
+        return false;
     }
 
-    int new_int_value = 0;
-    float new_float_value = 0;
-    bool is_converted = false;
-    if (param == GEAR_RATIO_PARAM || param == ANGLE_ENCODER_PARAM) {
-        is_converted = safe_stoi(value, new_int_value);
-    } else {
-        is_converted = safe_stof(value, new_float_value);
+    ParameterValue value{};
+    int integer = 0;
+    if (definition->type == ParameterType::REAL32) {
+        if (!parse_serial_number(input, value.emplace<float>())) {
+            responses.append("ERROR: Invalid value\n\r");
+            return false;
+        }
     }
-    if (!is_converted) {
+    else if (definition->type == ParameterType::NATURAL32 || definition->type == ParameterType::INTEGER32) {
+        if (!parse_serial_number(input, integer) || (definition->type == ParameterType::NATURAL32 && integer < 0)) {
+            responses.append("ERROR: Invalid value\n\r");
+            return false;
+        }
+        if (definition->type == ParameterType::INTEGER32) value = static_cast<int32_t>(integer);
+        else value = static_cast<uint32_t>(integer);
+    }
+    else {
         responses.append("ERROR: Invalid value\n\r");
         return false;
     }
 
-    if (param == GEAR_RATIO_PARAM) {
-        gear_ratio = static_cast<uint8_t>(new_int_value);
-        responses.append("OK: gear:%d\n\r", static_cast<int>(gear_ratio));
-    }
-    else if (param == ANGLE_ENCODER_PARAM) {
-        angle_encoder = static_cast<AngleEncoderType>(new_int_value);
-        responses.append("OK: ang_enc:%u\n\r", to_underlying(angle_encoder));
-    }
-    CHECK_AND_SET_PARAM_FLOAT(max_current, MAX_CURRENT_PARAM)
-    CHECK_AND_SET_PARAM_FLOAT(max_speed, MAX_SPEED_PARAM)
-    CHECK_AND_SET_PARAM_FLOAT(max_torque, MAX_TORQUE_PARAM)
-    CHECK_AND_SET_PARAM_FLOAT(angle_offset, ANGLE_OFFSET_PARAM)
-    CHECK_AND_SET_PARAM_FLOAT(min_angle, MIN_ANGLE_PARAM)
-    CHECK_AND_SET_PARAM_FLOAT(max_angle, MAX_ANGLE_PARAM)
-    CHECK_AND_SET_PARAM_FLOAT(torque_const, TORQUE_CONST_PARAM)
-    CHECK_AND_SET_PARAM_FLOAT(ki, KI_PARAM)
-    CHECK_AND_SET_PARAM_FLOAT(kp, KP_PARAM)
-    CHECK_AND_SET_PARAM_FLOAT(kd, KD_PARAM)
-    CHECK_AND_SET_PARAM_FLOAT(filter_a, FILTER_A_PARAM)
-    CHECK_AND_SET_PARAM_FLOAT(filter_g1, FILTER_G1_PARAM)
-    CHECK_AND_SET_PARAM_FLOAT(filter_g2, FILTER_G2_PARAM)
-    CHECK_AND_SET_PARAM_FLOAT(filter_g3, FILTER_G3_PARAM)
-    CHECK_AND_SET_PARAM_FLOAT(I_lpf_coefficient, FILTER_I_LPF_PARAM)
-    else {
-        responses.append("ERROR: Unknown parameter\n\r");
+    if (write_persistent_parameter(*this, definition->id, value, apply_runtime) != ParameterWriteResult::OK) {
+        responses.append("ERROR: Invalid value\n\r");
         return false;
+    }
+    if (definition->type == ParameterType::REAL32) {
+        responses.append("OK: %s:%f\n\r", definition->name.data(), std::get<float>(value));
+    }
+    else if (definition->type == ParameterType::INTEGER32) {
+        responses.append("OK: %s:%ld\n\r", definition->name.data(), std::get<int32_t>(value));
+    }
+    else {
+        responses.append("OK: %s:%lu\n\r", definition->name.data(), std::get<uint32_t>(value));
     }
     return true;
 }

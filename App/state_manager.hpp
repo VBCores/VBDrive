@@ -4,9 +4,12 @@
 #include <voltbro/motors/bldc/vbdrive/vbdrive.hpp>
 
 #include <cstddef>
+#include "parameters.hpp"
 
 VBDrive* get_motor();
 void reboot_to_bootloader();
+bool parse_serial_number(std::string_view input, int& value);
+bool parse_serial_number(std::string_view input, float& value);
 
 namespace VBDriveDefaults {
     inline constexpr float MAX_VOLTAGE = 50.0f;
@@ -54,8 +57,8 @@ struct __attribute__((packed)) VBDriveConfig: public BaseConfigData {
     bool are_required_params_set();
 
     void print_self(UARTResponseAccumulator& responses);
-    void get(const std::string& param, UARTResponseAccumulator& responses);
-    bool set(const std::string& param, std::string& value, UARTResponseAccumulator& responses);
+    void get(std::string_view param, UARTResponseAccumulator& responses);
+    bool set(std::string_view param, std::string_view value, UARTResponseAccumulator& responses, bool apply_runtime = false);
 };
 
 static_assert(sizeof(BaseConfigData) == 8);
@@ -75,28 +78,23 @@ struct CommandState: AppState {
     static constexpr AppStateT TESTING{6};
 };
 
-class DriveStateController: public AppConfigurator<CommandState, VBDriveConfig, CONFIG_PLACEMENT> {
+class DriveStateController: public AppConfigurator<CommandState, VBDriveConfig, CONFIG_PLACEMENT, std::string_view> {
 protected:
     static constexpr std::string_view TEST_COMMAND = "TEST";
     static constexpr std::string_view CALIBRATE_COMMAND = "CALIBRATE";
     static constexpr std::string_view STOP_COMMAND = "STOP";
-    static constexpr std::string_view BOOT_COMMAND = "BOOT";
     static constexpr std::string_view VEL_PARAM = "do_vel";
     static constexpr std::string_view ANGLE_PARAM = "do_ang";
     static constexpr std::string_view FREE_COMMAND = "do_free";
     static constexpr std::string_view START_LOGGING_COMMAND = "log_on";
     static constexpr std::string_view STOP_LOGGING_COMMAND = "log_off";
 
-    const std::array<std::string_view, 3> editable_in_test_mode = {
-        "min_ang",
-        "max_ang",
-        "ang_off"
-    };
-
     bool _is_logging = false;
+    CommandState::ValueT state_before_config = CommandState::INIT;
+    VBDriveConfig config_before_config;
 
 public:
-    using BaseConfigurator = AppConfigurator<CommandState, VBDriveConfig, CONFIG_PLACEMENT>;  // for brevity
+    using BaseConfigurator = AppConfigurator<CommandState, VBDriveConfig, CONFIG_PLACEMENT, std::string_view>;  // for brevity
     using BaseConfigurator::AppConfigurator;  // inherit constructors
     using BaseConfigurator::process_command;  // inherit base method
 
@@ -135,28 +133,95 @@ public:
         return BaseConfigurator::is_app_running() || BaseConfigurator::app_state == CommandState::TESTING;
     }
 
-    void process_command(std::string& command, UARTResponseAccumulator& responses) override {
-        if (command == BOOT_COMMAND) {
+    void process_command(std::string_view command, UARTResponseAccumulator& responses) override {
+        if (command == "BOOT") {
             responses.append("Rebooting to bootloader\n\r");
             wait_for_uart();
             reboot_to_bootloader();
             return;
         }
-        if (BaseConfigurator::app_state == CommandState::RUNNING) {
-            if (command == TEST_COMMAND) {
-                BaseConfigurator::app_state = CommandState::TESTING;
-                responses.append("Entering TEST mode\n\r");
+        auto values = BaseConfigurator::split_parameter(command);
+        if (values) {
+            auto [param, value] = *values;
+            if (value == "?") {
+                config_data.get(param, responses);
                 return;
             }
+            const auto* definition = find_parameter(param);
+            if (!definition && BaseConfigurator::app_state != CommandState::TESTING) {
+                responses.append("ERROR: Unknown parameter\n\r");
+                return;
+            }
+            if (definition && !definition->is_mutable) {
+                responses.append("ERROR: Read-only parameter\n\r");
+                return;
+            }
+            if (definition && !definition->is_persistent && definition->is_mutable) {
+                if (definition->id == ParameterId::IS_ON && BaseConfigurator::app_state != CommandState::RUNNING) {
+                    responses.append("ERROR: RUNNING mode required\n\r");
+                    return;
+                }
+                bool enabled = false;
+                if (value == "0") {
+                    enabled = false;
+                }
+                else if (value == "1") {
+                    enabled = true;
+                }
+                else {
+                    responses.append("ERROR: Invalid value\n\r");
+                    return;
+                }
+                ParameterValue parameter_value = enabled;
+                if (write_runtime_parameter(definition->id, parameter_value) == ParameterWriteResult::OK) {
+                    responses.append("OK: %s:%u\n\r", definition->name.data(), enabled ? 1U : 0U);
+                }
+                else {
+                    responses.append("ERROR: Parameter unavailable\n\r");
+                }
+                return;
+            }
+            if (definition && definition->is_persistent && BaseConfigurator::app_state != CommandState::CONFIG) {
+                if (app_state == CommandState::TESTING &&
+                    (param == "min_ang" || param == "max_ang" || param == "ang_off")) {
+                    do_save |= config_data.set(param, value, responses, true);
+                    return;
+                }
+                responses.append("ERROR: CONFIG mode required\n\r");
+                return;
+            }
+        }
+        if (BaseConfigurator::app_state == CommandState::RUNNING && command == TEST_COMMAND) {
+            BaseConfigurator::app_state = CommandState::TESTING;
+            responses.append("Entering TEST mode\n\r");
+            return;
         }
         if (BaseConfigurator::app_state == CommandState::TESTING) {
             handle_testing_mode(command, responses);
             return;
         }
+        if (command == CONFIG_COMMAND) {
+            if (app_state == CommandState::CONFIG) {
+                responses.append("CONFIG MODE ENABLED\n\r");
+                return;
+            }
+            state_before_config = app_state;
+            config_before_config = config_data;
+        }
+        if (app_state == CommandState::CONFIG && command == "EXIT") {
+            config_data = config_before_config;
+            do_save = false;
+            app_state = state_before_config;
+            if (app_state == CommandState::RUNNING) turn_on();
+            responses.append("CONFIG MODE EXITED, CHANGES DISCARDED\n\r");
+            return;
+        }
+        const bool pending_save = do_save;
         BaseConfigurator::process_command(command, responses);
+        if (values && app_state == CommandState::CONFIG) do_save |= pending_save;
     }
 
-    void handle_testing_mode(std::string& command, UARTResponseAccumulator& responses) {
+    void handle_testing_mode(std::string_view command, UARTResponseAccumulator& responses) {
         auto motor = get_motor();
 
         if (command == STOP_COMMAND) {
@@ -181,9 +246,9 @@ public:
                 responses.append("ERROR: Unknown command\n\r");
                 return;
             }
-            auto& [param, value] = *values;
+            auto [param, value] = *values;
             float setpoint = 0;
-            bool is_converted = safe_stof(value, setpoint);
+            bool is_converted = parse_serial_number(value, setpoint);
             if (!is_converted) {
                 responses.append("ERROR: Unknown command\n\r");
                 return;
@@ -209,18 +274,7 @@ public:
                 responses.append("Set angle: <%f>\n\r", setpoint);
             }
             else {
-                bool is_processed = process_parameter(command, responses);
-                if (!is_processed) {
-                    responses.append("ERROR: Unknown command\n\r");
-                }
-                else {
-                    // Apply runtime config dynamically in this session
-                    auto new_runtime_config = motor->get_runtime_config();
-                    new_runtime_config.user_angle_offset = config_data.angle_offset;
-                    new_runtime_config.user_position_lower_limit = config_data.min_angle;
-                    new_runtime_config.user_position_upper_limit = config_data.max_angle;
-                    motor->set_runtime_config(new_runtime_config);
-                }
+                responses.append("ERROR: Unknown command\n\r");
             }
         }
     }

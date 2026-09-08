@@ -19,7 +19,7 @@ The board uses a UART-based serial interface for configuration, calibration, tes
 
 * **Read parameter**:
   `<parameter_name>:?`
-  Example: `node_id:?` -> `node_id:11`
+  Example: `node_id:?` -> `node_id:11`. Queries work in every mode, without `CONFIG`.
 
 * **Write parameter**:
   `<parameter_name>:<value>`
@@ -32,6 +32,7 @@ The board uses a UART-based serial interface for configuration, calibration, tes
 | Command | Available State | Description |
 | ------- | --------------- | ----------- |
 | `CONFIG` | Any non-TEST state | Enter configuration mode and stop motor |
+| `EXIT` | CONFIG | Discard staged changes without writing EEPROM; restore the previous mode |
 | `SAVE` | CONFIG | Persist updated config to EEPROM (if changed), exit config mode, start motor |
 | `RESET` | CONFIG | Load default config values in RAM (does NOT affect current session - requires `SAVE` or `APPLY` to persist) |
 | `APPLY` | Any non-TEST state | Persist updated config (if changed) and reboot |
@@ -51,6 +52,7 @@ The board uses a UART-based serial interface for configuration, calibration, tes
 | `max_spd`  | Maximum motor speed (rad)                                 | Float   | `1000.0`       |
 | `max_tq`   | Maximum torque output (Nm)                                | Float   | `1.2`          |
 | `ang_off`  | Joint angle offset (rad)                                  | Float   | `0.0`, `15.5`  |
+| `ang_dir`  | Joint angle direction multiplier, -1 or +1 | Integer | `1`, `-1` |
 | `min_ang`  | Minimum allowed angle (rad)                               | Float   | `-30.0`        |
 | `max_ang`  | Maximum allowed angle (rad)                               | Float   | `30.0`         |
 | `kt`       | Torque constant (Nm/A)                                    | Float   | `0.12`         |
@@ -64,8 +66,8 @@ The board uses a UART-based serial interface for configuration, calibration, tes
 | `i_lpf`    | Current low-pass filter coefficient                       | Float   | `0.1`          |
 | `ang_enc`  | Angle encoder type enum, 0 rotor, 1 - shaft               | Integer | `0`, `1`.      |
 | `node_id`  | Cyphal/CAN node ID                                        | Integer | `1`, `42`      |
-| `d_baud`   | FDCAN data baud rate enum (serial/EEPROM only, see below) | Enum    | `0`, `1`, `2`  |
-| `n_baud`   | FDCAN nominal baud rate enum (serial/EEPROM only, see below) | Enum | `3`, `4`       |
+| `data_baud`   | FDCAN data baud rate enum (see below) | Enum    | `0`, `1`, `2`  |
+| `nominal_baud`   | FDCAN nominal baud rate enum (see below) | Enum | `3`, `4`       |
 
 ---
 
@@ -73,18 +75,18 @@ The board uses a UART-based serial interface for configuration, calibration, tes
 
 | parameter           | Value Name | Speed    | Numeric Value |
 |---------------------|------------|----------|---------------|
-| `n_baud`            | `KHz62`    | 62.5 kHz | `0`           |
+| `nominal_baud`            | `KHz62`    | 62.5 kHz | `0`           |
 |                     | `KHz125`   | 125 kHz  | `1`           |
 |                     | `KHz250`   | 250 kHz  | `2`           |
 |                     | `KHz500`   | 500 kHz  | `3`           |
 |                     | `KHz1000`  | 1 MHz    | `4`           |
 |---------------------|------------|----------|---------------|
-| `d_baud`            | `KHz1000`  | 1 MHz    | `0`           |
+| `data_baud`            | `KHz1000`  | 1 MHz    | `0`           |
 |                     | `KHz2000`  | 2 MHz    | `1`           |
 |                     | `KHz4000`  | 4 MHz    | `2`           |
 |                     | `KHz8000`  | 8 MHz    | `3`           |
 
-`n_baud` and `d_baud` are intentionally configurable only through the UART/EEPROM path. They are not exposed as Cyphal registers, because changing the CAN timing through the same CAN transport can make the node disappear from the bus.
+`nominal_baud` and `data_baud` are available through both Serial and Cyphal. Writes update EEPROM configuration; active CAN timing changes only after reboot.
 
 ---
 
@@ -115,7 +117,7 @@ rotor: <u16> shaft :<u16> angle: <float> velocity: <float>
 * **Success**: `OK: <param>:<value>` (set operations)
 * **Error**: `ERROR: Unknown command`, `ERROR: Unknown parameter`, `ERROR: Invalid value`
 * **Config persistence**: UART configuration settings are written to EEPROM on `SAVE`/`APPLY` (not on every `SET`)
-* **Bootloader entry**: `BOOT` writes only the bootloader request magic. VBBoot reads `node_id`, `n_baud`, and `d_baud` from the EEPROM config prefix.
+* **Bootloader entry**: `BOOT` writes only the bootloader request magic. VBBoot reads `node_id`, `nominal_baud`, and `data_baud` from the EEPROM config prefix.
 
 ---
 
@@ -172,32 +174,30 @@ The BLDC Motor Controller communicates over **Cyphal/FDCAN** to publish real-tim
 
 ### **Registers**
 
-| Register Name           | Type        | Persistence | Description |
-| -------------           | ----        | ----------- | ----------- |
-| `state.is_on`           | `bit`       | Runtime     | Turns the motor driver on/off |
-| `state.errors`          | `natural32` | Runtime     | Invalid Cyphal command counter |
-| `command.bootloader`    | `bit`       | Runtime     | Reboot request into VBBoot when written as true |
-| `limit.current`         | `real32`    | EEPROM      | Current limit in amperes |
-| `limit.torque`          | `real32`    | EEPROM      | Torque limit in N m |
-| `limit.speed`           | `real32`    | EEPROM      | Speed limit in rad/s |
-| `limit.min_angle`       | `real32`    | EEPROM      | Lower joint angle limit in rad |
-| `limit.max_angle`       | `real32`    | EEPROM      | Upper joint angle limit in rad |
-| `angle.offset`          | `real32`    | EEPROM      | Joint angle offset in rad |
-| `angle.direction`       | `integer32` | EEPROM      | Joint angle direction multiplier |
-| `node.id`               | `natural32` | EEPROM      | Cyphal node ID |
-| `config.gear`           | `natural32` | EEPROM      | Gear ratio |
-| `config.angle_encoder`  | `natural32` | EEPROM      | Angle encoder enum, 0 rotor, 1 shaft |
-| `motor.torque_constant` | `real32`    | EEPROM      | Torque constant in N m/A |
-| `foc.kp`                | `real32`    | EEPROM      | Current proportional gain |
-| `foc.ki`                | `real32`    | EEPROM      | Current integral gain |
-| `foc.kd`                | `real32`    | EEPROM      | Current derivative gain |
-| `filter.a`              | `real32`    | EEPROM      | Main filter parameter A |
-| `filter.g1`             | `real32`    | EEPROM      | Filter gain 1 |
-| `filter.g2`             | `real32`    | EEPROM      | Filter gain 2 |
-| `filter.g3`             | `real32`    | EEPROM      | Filter gain 3 |
-| `filter.i_lpf`          | `real32`    | EEPROM      | Current low-pass filter coefficient |
+Serial and Cyphal share the 33-entry catalog in `App/parameters.hpp`. All configuration parameters listed above are mutable and persistent. Integer parameters use `natural32`, except `ang_dir` (`integer32`); floating-point parameters use `real32`. Old dotted register names and `n_baud`/`d_baud` aliases are no longer accepted.
 
-Persistent register writes are queued and saved to EEPROM from the main loop. The config starts at EEPROM offset `0`, so VBBoot can read the shared C-compatible prefix containing `node_id`, `n_baud`, and `d_baud`. If the app does not have a complete EEPROM config yet, it starts Cyphal in maintenance mode with a deterministic setup node ID derived from the MCU UID.
+The remaining parameters are non-persistent:
+
+| Name | Cyphal type | Access | Meaning |
+| --- | --- | --- | --- |
+| `is_on` | bit | read/write | Driver enable; Serial writes 0/1 in RUNNING |
+| `bootloader` | bit | read/write | Writing true requests VBBoot; Serial also retains `BOOT` |
+| `cmd_errors` | natural32 | read-only | Rejected Cyphal movement commands |
+| `vbdrive_model` | string | read-only | CMake constant `M4310` |
+| `firmware_rev` | string | read-only | 16 hexadecimal digits of the VBDrive HEAD commit |
+| `bus_voltage` | real32 | read-only | Bus voltage, V |
+| `bus_current` | real32 | read-only | Existing working-current measurement, A; not a separate DC-link current sensor |
+| `temp_mcu` | real32 | read-only | MCU temperature, K |
+| `temp_stator` | real32 | read-only | Stator temperature, K |
+| `is_fault` | bit | read-only | Currently false; DRV_FAULT integration is deferred |
+| `encoder_shaft` | natural32 | read-only | Raw external encoder counts |
+| `encoder_rotor` | natural32 | read-only | Raw internal encoder counts |
+
+Readonly writes do not change values. Unavailable motor measurements return an empty Cyphal value / a Serial error before motor initialization. `firmware_rev` also supplies GetInfo's numeric `software_vcs_revision_id`; it identifies the commit, not uncommitted changes.
+
+Serial config writes are staged until `SAVE`/`APPLY`. Repeated `CONFIG` does not replace the rollback snapshot; `EXIT` also rolls back `RESET`. TEST retains live `min_ang`, `max_ang`, `ang_off` updates. Reads work in every mode.
+
+Persistent register writes are queued and saved to EEPROM from the main loop. The config starts at EEPROM offset `0`, so VBBoot can read the shared C-compatible prefix containing `node_id`, `nominal_baud`, and `data_baud`. If the app does not have a complete EEPROM config yet, it starts Cyphal in maintenance mode with a deterministic setup node ID derived from the MCU UID.
 
 ### **Angle Frame Semantics**
 
@@ -205,9 +205,9 @@ Persistent register writes are queued and saved to EEPROM from the main loop. Th
 
 All joint-angle values exposed over Cyphal use the same corrected frame:
 
-* `reported_angle = measured_shaft_angle + angle.offset`
-* `voltbro.foc.command.angle`, `voltbro.foc.specific_control` position targets, `limit.min_angle`, and `limit.max_angle` are all interpreted in that corrected frame
-* Positive `angle.offset` increases the reported and commanded joint angle for the same physical shaft position
+* `reported_angle = measured_shaft_angle * ang_dir + ang_off`
+* `voltbro.foc.command.angle`, `voltbro.foc.specific_control` position targets, `min_ang`, and `max_ang` are all interpreted in that corrected frame
+* Positive `ang_off` increases the reported and commanded joint angle for the same physical shaft position
 * Units are radians
 
 This means limit enforcement and position control are applied after the offset is added, so the configured limits match the angles seen by higher-level kinematics.
@@ -217,10 +217,10 @@ This means limit enforcement and position control are applied after the offset i
 1. Move the joint to the desired mechanical zero.
 2. Read the current joint angle.
 3. Compute the required offset so the reported angle becomes zero:
-   `angle.offset = -measured_shaft_angle`
-4. Write `angle.offset` via `uavcan.register.Access`.
-5. Read back `angle.offset`, `limit.min_angle`, and `limit.max_angle` to confirm the corrected frame.
-6. Set `limit.min_angle` and `limit.max_angle` in the same corrected frame.
+   `ang_off = -measured_shaft_angle * ang_dir`
+4. Write `ang_off` via `uavcan.register.Access`.
+5. Read back `ang_off`, `min_ang`, and `max_ang` to confirm the corrected frame.
+6. Set `min_ang` and `max_ang` in the same corrected frame.
 
 ---
 
@@ -240,3 +240,13 @@ The controller also publishes standard Cyphal messages:
 * **uavcan.node.Heartbeat** - default heartbeat message
 
 ---
+
+## Build and verification
+
+Initialize submodules before configuring. DSDL C headers and C++ traits are generated into the build directory using the CMake module and templates supplied by libcxxcanard. Neither the Arduino `src/` tree nor an `App/cyphal.h` shim is used.
+
+`VBDrive_full.hex` combines VBBoot at `0x08000000` with VBDrive at `0x08003000`. Both Release and RelWithDebInfo fit the flash partitions; Debug is not supported on this layout.
+
+After a Release build, run `python3 tests/parameter_interfaces.py` for host regressions against the actual parameter implementation, Serial state controller and Cyphal callback (hardware/transport doubles).
+
+The current main uses configuration type `0x44AAABFF` at EEPROM offset zero, followed by calibration. This differs from older VBDrive firmware. Back up configuration and calibration before flashing an older device; do not assume its EEPROM is layout-compatible.
