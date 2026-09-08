@@ -2,6 +2,7 @@ NOTES.*
 scratch.ipynb
 compile_commands.json
 var/
+proxmox-jobs*
 
 # Local keys
 *.pub
