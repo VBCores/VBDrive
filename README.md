@@ -159,16 +159,28 @@ The BLDC Motor Controller communicates over **Cyphal/FDCAN** to publish real-tim
 
 | Port ID | Message Type                              | Interval | Description                                   |
 | ------- | ----------------------------------------- | -------- | --------------------------------------------- |
-| `3811`  | `voltbro.foc.state_simple.1.0`            | 1 ms     | Current state (angle, speed, torque, etc.)    |
+| `3811`  | `voltbro.foc.MITState.1.0`               | 1 ms     | Timestamp, position, velocity, torque        |
 
 ---
 
 ### **Subscribed Messages**
 
+`MITState.1.0` preserves the first four fields of `state_simple.1.0` on the wire.
+Legacy clients can still read timestamp, angle, velocity and torque; the removed
+current, voltage, temperature and fault fields decode as zeros, not measurements.
+Read those measurements through the shared registers instead.
+
 | Port ID Formula  | Message Type                       | Description                                                                 |
 | ---------------- | ---------------------------------- | --------------------------------------------------------------------------- |
-| `2107 + node_id` | `voltbro.foc.command.1.0`          | Direct FOC target command: torque, angle, velocity, and PID gains           |
+| `2107 + node_id` | `voltbro.foc.MITCommand.1.0` (also legacy `voltbro.foc.command.1.0`) | Torque, position, velocity, position gain and velocity gain |
 | `3407 + node_id` | `voltbro.foc.specific_control.1.0` | High-level, single parameter control setpoint                               |
+
+`MITCommand.1.0` serializes `torq`, `pos`, `vel`, `pos_gain`, `vel_gain` in that
+order (20 bytes). The existing subscription also accepts the 28-byte legacy
+`command.1.0`, ignoring its trailing `I_kp`/`I_ki`. Both formats leave the current
+gains unchanged. This compatibility is for old clients
+with new firmware; new clients with old firmware are not supported. CAN FD
+padding is accounted for without adding a second subscription.
 
 ---
 

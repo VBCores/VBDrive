@@ -25,9 +25,9 @@
 #include <uavcan/si/unit/angle/Scalar_1_0.hpp>
 #include <uavcan/si/unit/torque/Scalar_1_0.hpp>
 #include <uavcan/si/unit/voltage/Scalar_1_0.hpp>
-#include <voltbro/foc/command_1_0.hpp>
+#include <voltbro/foc/MITCommand_1_0.hpp>
 #include <voltbro/foc/specific_control_1_0.hpp>
-#include <voltbro/foc/state_simple_1_0.hpp>
+#include <voltbro/foc/MITState_1_0.hpp>
 
 #include <voltbro/eeprom/eeprom.hpp>
 #include <voltbro/encoders/ASxxxx/AS5047P.hpp>
@@ -351,8 +351,6 @@ void app() {
 
 #ifndef NO_CYPHAL
 //#pragma region Cyphal
-using FOCCommand = voltbro_foc_command_1_0;
-using FOCState = voltbro_foc_state_simple_1_0;
 using SpecificControl = voltbro_foc_specific_control_1_0;
 
 static constexpr CanardPortID FOC_COMMAND_PORT = 2107;
@@ -386,48 +384,36 @@ void in_loop_reporting(millis current_t) {
 
     static millis report_time = 0;
     EACH_N(current_t, report_time, 1, {
-        FOCState state_msg = {};
+        voltbro_foc_MITState_1_0 state_msg = {};
 
         state_msg.timestamp.microsecond = system_time();
 
-        state_msg.angle.radian = motor->get_angle();
-        state_msg.velocity.radian_per_second = motor->get_velocity();
-        state_msg._torque.newton_meter = motor->get_torque();
+        state_msg.pos.radian = motor->get_angle();
+        state_msg.vel.radian_per_second = motor->get_velocity();
+        state_msg._torq.newton_meter = motor->get_torque();
 
-        state_msg.current.ampere = motor->get_working_current();
-        state_msg.bus_voltage.volt = motor_inverter.get_busV();
-
-        constexpr float KELVIN_OFFSET = 273.15f;
+        // Keep temperature measurements fresh for Serial/Cyphal registers.
         motor_inverter.update_temperature();
-        state_msg.mcu_temp.kelvin = motor_inverter.get_mcu_temperature() + KELVIN_OFFSET;
-        state_msg.stator_temp.kelvin = motor_inverter.get_stator_temperature() + KELVIN_OFFSET;
-
-        state_msg.has_fault.value = false; // TODO: fault check
 
         static CanardTransferID state_transfer_id = 0;
         get_interface()->send_msg(&state_msg, FOC_STATE_PORT, &state_transfer_id);
     })
 }
 
-class FOCCommandSub: public AbstractSubscription<FOCCommand> {
+class FOCCommandSub: public AbstractSubscription<voltbro_foc_MITCommand_1_0> {
 public:
-    FOCCommandSub(InterfacePtr interface, CanardPortID port_id): AbstractSubscription<FOCCommand>(interface, port_id) {};
-    #pragma GCC diagnostic push
-    #pragma GCC diagnostic ignored "-Wunused-parameter"
-    // NOTE: transfer parameter required by the interface, but not used in this implementation
-    void handler(const FOCCommand& msg, CanardRxTransfer* _) override {
-    #pragma GCC diagnostic pop
+    FOCCommandSub(InterfacePtr interface, CanardPortID port_id): AbstractSubscription<voltbro_foc_MITCommand_1_0>(interface, port_id) {};
+    void handler(const voltbro_foc_MITCommand_1_0& msg, CanardRxTransfer*) override {
         bool is_valid = motor->set_foc_point(FOCTarget {
-            .torque = msg._torque.newton_meter,
-            .angle = msg.angle.radian,
-            .velocity = msg.velocity.radian_per_second,
-            .angle_kp = msg.angle_kp.value,
-            .velocity_kp = msg.velocity_kp.value
+            .torque = msg._torq.newton_meter,
+            .angle = msg.pos.radian,
+            .velocity = msg.vel.radian_per_second,
+            .angle_kp = msg.pos_gain.value,
+            .velocity_kp = msg.vel_gain.value
         });
         if (!is_valid) {
             record_invalid_command();
         }
-        motor->set_current_regulator_params(msg.I_kp.value, msg.I_ki.value);
     }
 };
 

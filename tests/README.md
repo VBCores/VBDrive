@@ -1,5 +1,18 @@
 # Parameter integration verification
 
+## MIT compatibility
+
+After building RelWithDebInfo, run `python3 tests/mit_control.py`. This host test
+uses the generated MITCommand/MITState/legacy serializers, the actual FOC handler and
+libcanard TX/RX with MTU 8, 12, 16, 20, 24, 32, 48 and 64. It verifies the shared
+20-byte prefix, CAN FD padding and RX extent truncation, all five target fields,
+ignored legacy current-gain fields, unchanged current gains for both formats and
+invalid-target error counting. It also publishes MITState into a legacy
+state_simple subscriber, checking its four retained fields and zero-filled tail
+for every MTU. No hardware or motion is involved.
+
+## Parameters
+
 Run `python3 tests/parameter_interfaces.py` after generating the Release DSDL headers.
 The test compiles the actual parameter implementation, Serial controller and Cyphal
 register callback with host hardware/transport doubles. It checks all 33 reads and
