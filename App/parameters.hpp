@@ -51,6 +51,7 @@ enum class ParameterId : uint8_t {
     ENCODER_ROTOR,
     SERVO_POS_P_GAIN,
     SERVO_POS_I_GAIN,
+    SERVO_POS_D_GAIN,
     SERVO_VEL_P_GAIN,
     SERVO_VEL_I_GAIN,
     SERVO_TR_FORM,
@@ -78,7 +79,7 @@ enum class ParameterWriteResult : uint8_t {
     UNAVAILABLE
 };
 
-inline constexpr std::array<ParameterDefinition, 39> PARAMETER_CATALOG{{
+inline constexpr std::array<ParameterDefinition, 40> PARAMETER_CATALOG{{
     {ParameterId::GEAR,          "gear",          ParameterType::NATURAL32, true,  true},
     {ParameterId::MAX_I,         "max_i",         ParameterType::REAL32,    true,  true},
     {ParameterId::MAX_SPD,       "max_spd",       ParameterType::REAL32,    true,  true},
@@ -114,6 +115,7 @@ inline constexpr std::array<ParameterDefinition, 39> PARAMETER_CATALOG{{
     {ParameterId::ENCODER_ROTOR, "encoder_rotor", ParameterType::NATURAL32, false, false},
     {ParameterId::SERVO_POS_P_GAIN, "servo_pos_p_gain", ParameterType::REAL32, true, true},
     {ParameterId::SERVO_POS_I_GAIN, "servo_pos_i_gain", ParameterType::REAL32, true, true},
+    {ParameterId::SERVO_POS_D_GAIN, "servo_pos_d_gain", ParameterType::REAL32, true, true},
     {ParameterId::SERVO_VEL_P_GAIN, "servo_vel_p_gain", ParameterType::REAL32, true, true},
     {ParameterId::SERVO_VEL_I_GAIN, "servo_vel_i_gain", ParameterType::REAL32, true, true},
     {ParameterId::SERVO_TR_FORM, "servo_tr_form", ParameterType::NATURAL32, true, true},

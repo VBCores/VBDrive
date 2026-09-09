@@ -28,12 +28,13 @@ void record_invalid_command() {
 bool read_parameter(const VBDriveConfig& config, ParameterId id, ParameterValue& value) {
     value = {};
     switch (id) {
-        case ParameterId::SERVO_POS_P_GAIN: value = config.servo_pos_p_gain; return true;
-        case ParameterId::SERVO_POS_I_GAIN: value = config.servo_pos_i_gain; return true;
-        case ParameterId::SERVO_VEL_P_GAIN: value = config.servo_vel_p_gain; return true;
-        case ParameterId::SERVO_VEL_I_GAIN: value = config.servo_vel_i_gain; return true;
-        case ParameterId::SERVO_TR_FORM: value = config.servo_transient_form; return true;
-        case ParameterId::SERVO_TR_VEL: value = config.servo_transient_vel; return true;
+        case ParameterId::SERVO_POS_P_GAIN: value = value_or_default(config.servo_pos_p_gain, VBDriveDefaults::SERVO_POS_P_GAIN); return true;
+        case ParameterId::SERVO_POS_I_GAIN: value = value_or_default(config.servo_pos_i_gain, VBDriveDefaults::SERVO_POS_I_GAIN); return true;
+        case ParameterId::SERVO_POS_D_GAIN: value = value_or_default(config.servo_pos_d_gain, VBDriveDefaults::SERVO_POS_D_GAIN); return true;
+        case ParameterId::SERVO_VEL_P_GAIN: value = value_or_default(config.servo_vel_p_gain, VBDriveDefaults::SERVO_VEL_P_GAIN); return true;
+        case ParameterId::SERVO_VEL_I_GAIN: value = value_or_default(config.servo_vel_i_gain, VBDriveDefaults::SERVO_VEL_I_GAIN); return true;
+        case ParameterId::SERVO_TR_FORM: value = value_or_default(config.servo_transient_form, VBDriveDefaults::SERVO_TRANSIENT_FORM, uint32_t(0)); return true;
+        case ParameterId::SERVO_TR_VEL: value = value_or_default(config.servo_transient_vel, VBDriveDefaults::SERVO_TRANSIENT_VEL); return true;
         case ParameterId::ANG_DIR:
             value.emplace<int32_t>(config.angle_direction == -1 ? -1 : 1);
             return true;
@@ -163,9 +164,25 @@ ParameterWriteResult write_persistent_parameter(
         } else {
             const float gain = std::get<float>(value);
             if (!std::isfinite(gain) || gain < 0) return ParameterWriteResult::INVALID;
+            if (apply_runtime && id <= ParameterId::SERVO_VEL_I_GAIN) {
+                auto motor = get_motor();
+                if (!motor) return ParameterWriteResult::UNAVAILABLE;
+                const auto type = id <= ParameterId::SERVO_POS_D_GAIN ? SetPointType::POSITION : SetPointType::VELOCITY;
+                auto active = motor->get_servo_config(type);
+                switch (id) {
+                    case ParameterId::SERVO_POS_P_GAIN:
+                    case ParameterId::SERVO_VEL_P_GAIN: active.kp = gain; break;
+                    case ParameterId::SERVO_POS_I_GAIN:
+                    case ParameterId::SERVO_VEL_I_GAIN: active.ki = gain; break;
+                    case ParameterId::SERVO_POS_D_GAIN: active.kd = gain; break;
+                    default: break;
+                }
+                motor->update_servo_config(type, active);
+            }
             switch (id) {
                 case ParameterId::SERVO_POS_P_GAIN: config.servo_pos_p_gain = gain; break;
                 case ParameterId::SERVO_POS_I_GAIN: config.servo_pos_i_gain = gain; break;
+                case ParameterId::SERVO_POS_D_GAIN: config.servo_pos_d_gain = gain; break;
                 case ParameterId::SERVO_VEL_P_GAIN: config.servo_vel_p_gain = gain; break;
                 case ParameterId::SERVO_VEL_I_GAIN: config.servo_vel_i_gain = gain; break;
                 case ParameterId::SERVO_TR_VEL: config.servo_transient_vel = gain; break;

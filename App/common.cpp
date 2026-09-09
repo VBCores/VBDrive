@@ -47,6 +47,7 @@ static inline void init_dwt() {
     dwt_ready = true;
 }
 volatile uint32_t last_cycle_cost = 0;
+volatile uint32_t max_cycle_cost = 0;
 volatile uint32_t value_invocations = 0;
 static uint16_t profile_sample_counter = 0;
 #endif
@@ -92,6 +93,7 @@ __attribute__((hot)) void main_callback() {
     #ifdef FOC_PROFILE
     if (profile_this_call) {
         last_cycle_cost = DWT->CYCCNT - start_cycles;
+        if (last_cycle_cost > max_cycle_cost) max_cycle_cost = last_cycle_cost;
         // <'++'/'+='/... expression of 'volatile'-qualified type is deprecated> - C++20
         value_invocations = value_invocations + FOC_PROFILE_SAMPLE_PERIOD;
         #if !defined(ENABLE_DT) && defined(MONITOR)

@@ -67,11 +67,16 @@ struct DriveRuntimeConfig {
     int8_t user_angle_direction=1;
 };
 struct FOCTarget { float torque=0,angle=0,velocity=0,angle_kp=0,velocity_kp=0; };
+enum class SetPointType { POSITION, VELOCITY };
+struct PIDConfig { float kp=0, ki=0, kd=0; };
 struct VBInverter {
     float get_mcu_temperature() const {return 30;}
     float get_stator_temperature() const {return 25;}
 };
 struct VBDrive {
+    PIDConfig position, velocity;
+    PIDConfig get_servo_config(SetPointType type) const {return type==SetPointType::POSITION?position:velocity;}
+    void update_servo_config(SetPointType type,PIDConfig config) {(type==SetPointType::POSITION?position:velocity)=config;}
     bool on=true;
     DriveRuntimeConfig limits;
     VBInverter inverter;
@@ -85,7 +90,8 @@ struct VBDrive {
     float get_working_current() const {return .1f;}
     uint32_t get_shaft_encoder_value() const {return 123;}
     uint32_t get_rotor_encoder_value() const {return 456;}
-    void set_foc_point(FOCTarget v) {target=v;}
+    bool valid_target=true;
+    bool set_foc_point(FOCTarget v) {if (!valid_target) return false; target=v; return true;}
 };
 '''
 
@@ -94,9 +100,19 @@ std::string command(std::string_view s) {
     uart_output.clear(); manager.process_command(s); return uart_output;
 }
 int main() {
-    static_assert(sizeof(VBDriveConfig)==98);
-    static_assert(CONFIG_PLACEMENT==0 && CALIBRATION_PLACEMENT==99);
+    {
+        char buffer[16];
+        UART_HandleTypeDef uart;
+        { UARTResponseAccumulator response(&uart,buffer,sizeof(buffer));
+          response.append("%s","012345678901234567890123456789"); }
+        assert(uart_output.size()<=sizeof(buffer));
+    }
+    static_assert(sizeof(VBDriveConfig)==102);
+    static_assert(CONFIG_PLACEMENT==0 && CALIBRATION_PLACEMENT==103);
     auto& config = manager.get_config();
+    config.apply_servo_config();
+    assert(device.position.kp==150 && device.position.ki==200 && device.position.kd==10);
+    assert(device.velocity.kp==30 && device.velocity.ki==60);
     config.node_id=11; config.gear_ratio=36; config.was_configured=true;
     manager.set_state(CommandState::RUNNING);
     assert(command("firmware_rev:?\r\n").find("0123456789abcdef")!=std::string::npos);
@@ -191,10 +207,11 @@ int main() {
     fill_register_bit(input,true); access("bootloader",input);
     assert(bootloader_reboot_pending); reboot_to_bootloader_if_requested(); assert(boots==1);
     command("BOOT"); assert(boots==2);
-    // All six Servo fields persist in the same config write.
+    // All seven Servo fields persist in the same config write.
     std::fill(eeprom.memory.begin()+sizeof(VBDriveConfig),eeprom.memory.end(),0xA5);
     command("CONFIG");
     command("servo_pos_p_gain:1"); command("servo_pos_i_gain:2");
+    command("servo_pos_d_gain:0.5");
     command("servo_vel_p_gain:3"); command("servo_vel_i_gain:4");
     command("servo_tr_form:2"); command("servo_tr_vel:5");
     command("SAVE");
@@ -202,19 +219,61 @@ int main() {
     assert(eeprom.read(&loaded,0)==HAL_OK);
     assert(loaded.gear_ratio==config.gear_ratio && loaded.servo_pos_p_gain==1);
     assert(loaded.servo_pos_i_gain==2 && loaded.servo_vel_p_gain==3 && loaded.servo_vel_i_gain==4);
+    assert(loaded.servo_pos_d_gain==.5f && device.position.kd==.5f);
     assert(loaded.servo_transient_form==2 && loaded.servo_transient_vel==5);
     command("CONFIG"); command("RESET");
-    assert(config.servo_pos_p_gain==0 && config.servo_transient_form==1);
+    assert(std::isnan(config.servo_pos_p_gain) && std::isnan(config.servo_pos_i_gain) && std::isnan(config.servo_pos_d_gain));
+    assert(std::isnan(config.servo_vel_p_gain) && std::isnan(config.servo_vel_i_gain) && std::isnan(config.servo_transient_vel));
+    assert(config.servo_transient_form==0);
+    assert(command("servo_tr_form:?").find("servo_tr_form:1")!=std::string::npos);
+    assert(command("servo_tr_vel:?").find("0.000000")!=std::string::npos);
+    assert(command("servo_pos_p_gain:?").find("150.000000")!=std::string::npos);
+    assert(command("servo_pos_i_gain:?").find("200.000000")!=std::string::npos);
+    assert(command("servo_pos_d_gain:?").find("10.000000")!=std::string::npos);
+    assert(command("servo_vel_p_gain:?").find("30.000000")!=std::string::npos);
+    assert(command("servo_vel_i_gain:?").find("60.000000")!=std::string::npos);
     command("EXIT");
     assert(config.servo_pos_p_gain==1 && config.servo_transient_form==2);
     for (size_t i=sizeof(VBDriveConfig);i<eeprom.memory.size();++i) assert(eeprom.memory[i]==0xA5);
-    for (auto name : {"servo_pos_p_gain","servo_pos_i_gain","servo_vel_p_gain","servo_vel_i_gain","servo_tr_vel"}) {
+    for (auto name : {"servo_pos_p_gain","servo_pos_i_gain","servo_pos_d_gain","servo_vel_p_gain","servo_vel_i_gain","servo_tr_vel"}) {
         auto* d=find_parameter(name);
         assert(write_persistent_parameter(config,d->id,-1.0f,false)==ParameterWriteResult::INVALID);
         assert(write_persistent_parameter(config,d->id,NAN,false)==ParameterWriteResult::INVALID);
     }
     assert(write_persistent_parameter(config,ParameterId::SERVO_TR_FORM,uint32_t(3),false)==ParameterWriteResult::INVALID);
-    puts("PASS: 37 shared parameters, 2 Cyphal-only registers, Serial/Cyphal writes and rollback, unified config persistence, boot commands");
+    command("CONFIG"); command("servo_pos_p_gain:9");
+    assert(device.position.kp==1);
+    fill_register_real32(input,7); access("servo_pos_i_gain",input);
+    assert(device.position.kp==1 && device.position.ki==7);
+    persist_pending_config_if_needed(); eeprom.read(&loaded,0);
+    assert(loaded.servo_pos_p_gain==1 && loaded.servo_pos_i_gain==7);
+    command("EXIT");
+    assert(config.servo_pos_p_gain==1 && config.servo_pos_i_gain==7);
+    command("CONFIG"); command("servo_pos_d_gain:0.75"); command("APPLY");
+    eeprom.read(&loaded,0); assert(loaded.servo_pos_d_gain==.75f);
+    assert(device.position.kd==.5f); // APPLY reloads on the actual reset, not before it.
+    loaded.apply_servo_config(); assert(device.position.kd==.75f);
+    manager.set_state(CommandState::RUNNING); command("TEST"); command("do_vel:0.15");
+    unsigned errors=access("cmd_errors",{}).natural32.value.elements[0];
+    for (auto invalid : {"do_vel:nan", "do_ang:inf", "do_vel:-inf", "do_ang:bad"}) {
+        assert(command(invalid).find("Invalid target")!=std::string::npos);
+        assert(device.target.velocity==.15f);
+    }
+    device.valid_target=false;
+    assert(command("do_vel:5").find("Invalid target")!=std::string::npos);
+    assert(device.target.velocity==.15f);
+    assert(access("cmd_errors",{}).natural32.value.elements[0]==errors+5);
+    device.valid_target=true; command("STOP");
+    // Explicit zero is a value, not the NAN sentinel for a default gain.
+    VBDriveConfig zero;
+    zero.servo_pos_p_gain=zero.servo_pos_i_gain=zero.servo_pos_d_gain=0;
+    zero.servo_vel_p_gain=zero.servo_vel_i_gain=0;
+    zero.apply_servo_config();
+    assert(device.position.kp==0 && device.position.ki==0 && device.position.kd==0);
+    assert(device.velocity.kp==0 && device.velocity.ki==0);
+    ParameterValue zero_value;
+    assert(read_parameter(zero,ParameterId::SERVO_POS_P_GAIN,zero_value) && std::get<float>(zero_value)==0);
+    puts("PASS: 38 shared parameters, 2 Cyphal-only registers, Serial/Cyphal isolation, Servo apply and persistence, boot commands");
 }
 '''
 

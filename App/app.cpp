@@ -215,6 +215,7 @@ void create_motor(VBDriveConfig& config_data) {
         inductive_sensor,
         config_data.angle_encoder
     );
+    config_data.apply_servo_config();
     HAL_Delay(100);
     motor->init();
 }
@@ -363,7 +364,7 @@ static void persist_pending_config_if_needed() {
         return;
     }
     config_save_pending = false;
-    auto& config = get_app_manager().get_config();
+    auto& config = get_app_manager().get_committed_config();
     config.was_configured = config.are_required_params_set();
     HAL_IMPORTANT(get_eeprom().write<VBDriveConfig>(&config, CONFIG_PLACEMENT))
 }
@@ -503,7 +504,7 @@ static void handle_parameter_register(
                 break;
         }
         if (parsed) {
-            auto& config = get_app_manager().get_config();
+            auto& config = get_app_manager().get_committed_config();
             const auto write_result = definition.is_persistent
                 ? write_persistent_parameter(config, definition.id, requested, motor != nullptr)
                 : write_runtime_parameter(definition.id, requested);
@@ -515,7 +516,7 @@ static void handle_parameter_register(
     }
 
     ParameterValue current{};
-    if (!read_parameter(get_app_manager().get_config(), definition.id, current)) {
+    if (!read_parameter(get_app_manager().get_committed_config(), definition.id, current)) {
         v_out._tag_ = REGISTER_EMPTY_TAG;
         v_out.empty = {};
         return;

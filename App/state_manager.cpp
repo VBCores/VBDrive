@@ -6,6 +6,18 @@
 
 static constexpr size_t PARSED_VALUE_MAX_SIZE = 31;
 
+void VBDriveConfig::apply_servo_config() const {
+    auto motor = get_motor();
+    if (!motor) return;
+    motor->update_servo_config(SetPointType::POSITION,
+        PIDConfig{.kp = value_or_default(servo_pos_p_gain, VBDriveDefaults::SERVO_POS_P_GAIN),
+                  .ki = value_or_default(servo_pos_i_gain, VBDriveDefaults::SERVO_POS_I_GAIN),
+                  .kd = value_or_default(servo_pos_d_gain, VBDriveDefaults::SERVO_POS_D_GAIN)});
+    motor->update_servo_config(SetPointType::VELOCITY,
+        PIDConfig{.kp = value_or_default(servo_vel_p_gain, VBDriveDefaults::SERVO_VEL_P_GAIN),
+                  .ki = value_or_default(servo_vel_i_gain, VBDriveDefaults::SERVO_VEL_I_GAIN)});
+}
+
 bool parse_serial_number(std::string_view str, int& out_val) {
     if (str.empty()) return false;
     if (str.size() > PARSED_VALUE_MAX_SIZE) return false;

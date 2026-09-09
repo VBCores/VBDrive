@@ -12,6 +12,13 @@ bool parse_serial_number(std::string_view input, int& value);
 bool parse_serial_number(std::string_view input, float& value);
 
 namespace VBDriveDefaults {
+    inline constexpr float SERVO_POS_P_GAIN = 150.0f;
+    inline constexpr float SERVO_POS_I_GAIN = 200.0f;
+    inline constexpr float SERVO_POS_D_GAIN = 10.0f;
+    inline constexpr float SERVO_VEL_P_GAIN = 30.0f;
+    inline constexpr float SERVO_VEL_I_GAIN = 60.0f;
+    inline constexpr float SERVO_TRANSIENT_VEL = 0.0f;
+    inline constexpr uint32_t SERVO_TRANSIENT_FORM = 1; // LINE_TRAJ; not implemented yet.
     inline constexpr float MAX_VOLTAGE = 50.0f;
     inline constexpr uint8_t GEAR_RATIO = 36;
     inline constexpr float TORQUE_CONST = 1.0f;
@@ -48,12 +55,13 @@ struct __attribute__((packed)) VBDriveConfig: public BaseConfigData {
     float filter_g3 = NAN;
     float I_lpf_coefficient = NAN;
     AngleEncoderType angle_encoder = AngleEncoderType::ROTOR;
-    float servo_pos_p_gain = 0;
-    float servo_pos_i_gain = 0;
-    float servo_vel_p_gain = 0;
-    float servo_vel_i_gain = 0;
-    uint32_t servo_transient_form = 1; // LINE_TRAJ=1, POLYNOM_TRAJ=2; not implemented yet.
-    float servo_transient_vel = 0;
+    float servo_pos_p_gain = NAN;
+    float servo_pos_i_gain = NAN;
+    float servo_pos_d_gain = NAN;
+    float servo_vel_p_gain = NAN;
+    float servo_vel_i_gain = NAN;
+    uint32_t servo_transient_form = 0; // Unset; integer equivalent of NAN.
+    float servo_transient_vel = NAN;
 
     VBDriveConfig(): BaseConfigData() {
         type_id = VBDriveConfig::TYPE_ID;
@@ -65,6 +73,7 @@ struct __attribute__((packed)) VBDriveConfig: public BaseConfigData {
     void print_self(UARTResponseAccumulator& responses);
     void get(std::string_view param, UARTResponseAccumulator& responses);
     bool set(std::string_view param, std::string_view value, UARTResponseAccumulator& responses, bool apply_runtime = false);
+    void apply_servo_config() const;
 };
 
 static_assert(sizeof(BaseConfigData) == 8);
@@ -103,6 +112,11 @@ public:
     using BaseConfigurator = AppConfigurator<CommandState, VBDriveConfig, CONFIG_PLACEMENT, std::string_view>;  // for brevity
     using BaseConfigurator::AppConfigurator;  // inherit constructors
     using BaseConfigurator::process_command;  // inherit base method
+
+    // Cyphal must not read or persist the Serial CONFIG staging area.
+    VBDriveConfig& get_committed_config() {
+        return app_state == CommandState::CONFIG ? config_before_config : config_data;
+    }
 
     bool is_logging() {
         return BaseConfigurator::app_state == CommandState::TESTING && _is_logging;
@@ -226,8 +240,10 @@ public:
             responses.append("CONFIG MODE EXITED, CHANGES DISCARDED\n\r");
             return;
         }
+        const bool apply_servo = app_state == CommandState::CONFIG && command == SAVE_COMMAND;
         const bool pending_save = do_save;
         BaseConfigurator::process_command(command, responses);
+        if (apply_servo) config_data.apply_servo_config();
         if (values && app_state == CommandState::CONFIG) do_save |= pending_save;
     }
 
@@ -257,35 +273,30 @@ public:
                 return;
             }
             auto [param, value] = *values;
-            float setpoint = 0;
-            bool is_converted = parse_serial_number(value, setpoint);
-            if (!is_converted) {
+            if (param != VEL_PARAM && param != ANGLE_PARAM) {
                 responses.append("ERROR: Unknown command\n\r");
                 return;
             }
-            if (param == VEL_PARAM) {
-                motor->set_foc_point(FOCTarget{
-                    .torque = 0,
-                    .angle = 0,
-                    .velocity = setpoint,
-                    .angle_kp = 0,
-                    .velocity_kp = 0.5f
-                });
-                responses.append("Set velocity: <%f>\n\r", setpoint);
+            float setpoint = 0;
+            bool is_converted = parse_serial_number(value, setpoint);
+            if (!is_converted || !std::isfinite(setpoint)) {
+                record_invalid_command();
+                responses.append("ERROR: Invalid target\n\r");
+                return;
             }
-            else if (param == ANGLE_PARAM) {
-                motor->set_foc_point(FOCTarget{
-                    .torque = 0,
-                    .angle = setpoint,
-                    .velocity = 0,
-                    .angle_kp = 7.0f,
-                    .velocity_kp = 0.5
-                });
-                responses.append("Set angle: <%f>\n\r", setpoint);
+            const bool position = param == ANGLE_PARAM;
+            if (!motor->set_foc_point(FOCTarget{
+                .torque = 0,
+                .angle = position ? setpoint : 0,
+                .velocity = position ? 0 : setpoint,
+                .angle_kp = position ? 7.0f : 0,
+                .velocity_kp = 0.5f
+            })) {
+                record_invalid_command();
+                responses.append("ERROR: Invalid target\n\r");
+                return;
             }
-            else {
-                responses.append("ERROR: Unknown command\n\r");
-            }
+            responses.append(position ? "Set angle: <%f>\n\r" : "Set velocity: <%f>\n\r", setpoint);
         }
     }
 };

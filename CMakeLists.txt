@@ -136,7 +136,9 @@ add_compile_options(
     -mfpu=fpv4-sp-d16  # For Cortex-M4
 )
 
+option(VBDRIVE_FOC_PROFILE "Measure FOC cycle time, including in Release" OFF)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PUBLIC
+    $<$<BOOL:${VBDRIVE_FOC_PROFILE}>:FOC_PROFILE>
     $<$<CONFIG:RelWithDebInfo>: -DMONITOR -DFOC_PROFILE>
     $<$<CONFIG:Debug>: -DMONITOR -DDEBUG -DFOC_PROFILE>
 )

@@ -36,23 +36,50 @@ Servo parameters are shared Serial/Cyphal read/write persistent registers:
 
 | Name | Type | Default |
 | --- | --- | --- |
-| `servo_pos_p_gain` | real32 | 0 |
-| `servo_pos_i_gain` | real32 | 0 |
-| `servo_vel_p_gain` | real32 | 0 |
-| `servo_vel_i_gain` | real32 | 0 |
+| `servo_pos_p_gain` | real32 | 150 |
+| `servo_pos_i_gain` | real32 | 200 |
+| `servo_pos_d_gain` | real32 | 10 |
+| `servo_vel_p_gain` | real32 | 30 |
+| `servo_vel_i_gain` | real32 | 60 |
 | `servo_tr_form` | natural32 | 1 (`LINE_TRAJ`; 2 = `POLYNOM_TRAJ`) |
 | `servo_tr_vel` | real32 | 0 |
 
-Gains and transient velocity must be finite and non-negative. This change implements
-communication and persistence only: these values do not yet alter Servo control or
-generate trajectories. Existing Servo setpoint handling is unchanged. Its wire format
-matches legacy `specific_control` for modes 0–3; other modes are rejected.
-Serial writes require CONFIG and SAVE/APPLY; EXIT discards them. Cyphal writes are
-saved by the existing deferred-save path. Names are string views (up to 16 characters),
+Gains and transient velocity must be finite and non-negative. POSITION uses
+`torque = Kp * (target - position) + I - Kd * velocity`; VELOCITY uses
+`torque = Kp * (target - velocity) + I`. These are independent controllers, running
+every 25 microseconds, with `I += Ki * error * dt` in output-shaft N m. Torque is
+limited by hardware, user torque and available current (including stall derating),
+with conditional integration to prevent windup. Position D uses measured velocity,
+so target steps do not cause derivative kick. `max_spd` validates VELOCITY targets;
+it does not limit actual speed in POSITION. Zero gains produce zero torque.
+`servo_tr_form` and `servo_tr_vel` are stored but do not generate trajectories.
+The wire format matches legacy `specific_control` for modes 0–3; other modes are rejected.
+
+These starting gains were smoke-tested on M4310 with gear=36, kt=0.5,
+max_i=0.3 A and max_tq=5 Nm, using small commands in both directions.
+They are not load-independent tuning; check them with the actual mechanics and
+current/torque limits. Defaults apply to fresh configuration and RESET; existing
+EEPROM values are retained when flashing.
+
+`VBDriveDefaults` holds the effective defaults. Float fields in `VBDriveConfig`
+are `NAN` until explicitly set; integer `servo_tr_form` uses 0 as its unset value.
+Serial/Cyphal reads and motor initialization resolve these sentinels identically.
+Servo uses two libvoltbro `PIDRegulator` instances, with explicit measured
+derivative and conditional integration; FOC holds no separate PID state.
+
+Serial writes require CONFIG: SAVE applies Servo gains, APPLY saves and reboots,
+and EXIT discards staged changes. Other settings may still require APPLY.
+Cyphal gain writes apply before the next FOC tick and are saved by the existing
+deferred-save path, without exposing unsaved Serial CONFIG values.
+Changing a gain resets that controller's state but retains its target; rewriting
+the same gain or changing a target within the same mode does not reset it.
+Changing control mode resets both Servo integrators. Disable/enable clears the old
+target and waits at zero effort for a new command. TORQUE, VOLTAGE and MIT retain
+their control laws. Names are string views (up to 16 characters),
 not heap-allocated strings. The composite `servo_params` register is not used.
 
-All settings, including Servo, are stored in one 98-byte config at EEPROM offset 0.
-Calibration starts at 99, followed by encoder state. There is no old-layout migration.
+All settings, including Servo, are stored in one 102-byte config at EEPROM offset 0.
+Calibration starts at 103, followed by encoder state. There is no old-layout migration.
 Provision devices with erased external EEPROM, then configure and calibrate afresh;
 flashing MCU firmware alone does not erase external EEPROM.
 
@@ -289,6 +316,13 @@ The controller also publishes standard Cyphal messages:
 Initialize submodules before configuring. DSDL C headers and C++ traits are generated into the build directory using the CMake module and templates supplied by libcxxcanard. Neither the Arduino `src/` tree nor an `App/cyphal.h` shim is used.
 
 `VBDrive_full.hex` combines VBBoot at `0x08000000` with VBDrive at `0x08003000`. Both Release and RelWithDebInfo fit the flash partitions; Debug is not supported on this layout.
+
+Use Release for motor testing. The 2026-09-09 Servo smoke passed Serial/Cyphal
+and bounded PI/PID movement, but sampled FOC peaks still exceeded the 25 us
+budget (Release: 36.21 us; RelWithDebInfo: 39.56 us). Neither build has a verified
+40 kHz worst-case deadline; see `tests/README.md` for the measurement scope.
+Configure with `-DVBDRIVE_FOC_PROFILE=ON` to expose `last_cycle_cost` and
+`max_cycle_cost` in Release without enabling MONITOR (sample period: 256 calls).
 
 After a Release build, run `python3 tests/parameter_interfaces.py` for host regressions against the actual parameter implementation, Serial state controller and Cyphal callback (hardware/transport doubles).
 
