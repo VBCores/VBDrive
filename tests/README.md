@@ -3,11 +3,11 @@
 ## MIT compatibility
 
 After building RelWithDebInfo, run `python3 tests/mit_control.py`. This host test
-uses the generated MITCommand/MITState/legacy serializers, the actual FOC handler and
+uses the generated MITCommand/State/legacy serializers, the actual FOC handler and
 libcanard TX/RX with MTU 8, 12, 16, 20, 24, 32, 48 and 64. It verifies the shared
 20-byte prefix, CAN FD padding and RX extent truncation, all five target fields,
 ignored legacy current-gain fields, unchanged current gains for both formats and
-invalid-target error counting. It also publishes MITState into a legacy
+invalid-target error counting. It also publishes State into a legacy
 state_simple subscriber, checking its four retained fields and zero-filled tail
 for every MTU. No hardware or motion is involved.
 
@@ -15,14 +15,19 @@ for every MTU. No hardware or motion is involved.
 
 Run `python3 tests/parameter_interfaces.py` after generating the Release DSDL headers.
 The test compiles the actual parameter implementation, Serial controller and Cyphal
-register callback with host hardware/transport doubles. It checks all 33 reads and
-types (31 shared parameters plus Cyphal-only `bootloader` and `cmd_errors`),
+register callback with host hardware/transport doubles. It checks all 39 reads and
+types (37 shared parameters plus Cyphal-only `bootloader` and `cmd_errors`),
 rejection of both Cyphal-only names in every Serial mode, every persistent
 parameter's Serial write/EXIT rollback and Cyphal write,
 readonly write rejection, CONFIG snapshots, RESET rollback, SAVE after an invalid
 write, TEST commands/live angle limits, numeric validation, delayed EEPROM writes,
 configuration before motor creation and both boot commands. The EEPROM config size
-and placements are checked against the current main (74 bytes; config 0, calibration 75).
+and placements are checked (98 bytes; config 0, calibration 99).
+Unified config writes/readback and preservation of bytes outside the config
+are tested with a byte-addressed EEPROM double. Servo registers
+are included in the write/rollback tests, with negative/non-finite gain rejection
+and transient-form validation. The communication test also checks all four Servo
+setpoint modes, invalid modes and wire equality with legacy specific_control.
 It does not simulate the FOC loop, physical encoders, UART DMA or CAN transport.
 
 ## Main synchronization check, 2026-09-08

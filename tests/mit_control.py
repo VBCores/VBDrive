@@ -9,7 +9,8 @@ import tempfile
 
 root = Path(__file__).resolve().parents[1]
 app = (root / 'App/app.cpp').read_text()
-handler = app[app.index('class FOCCommandSub:'):app.index('class SpecificControlSub:')]
+handler = app[app.index('class FOCCommandSub:'):app.index('class ServoSub:')]
+servo_handler = app[app.index('class ServoSub:'):app.index('// NOTE: underlying CanardRxSubscriptions')]
 source = r'''
 #include <cassert>
 #include <cstdlib>
@@ -19,8 +20,10 @@ source = r'''
 #include <libcanard/canard.h>
 #include <voltbro/foc/command_1_0.h>
 #include <voltbro/foc/MITCommand_1_0.h>
-#include <voltbro/foc/MITState_1_0.h>
+#include <voltbro/foc/State_1_0.h>
 #include <voltbro/foc/state_simple_1_0.h>
+#include <voltbro/foc/Servo_1_0.h>
+#include <voltbro/foc/specific_control_1_0.h>
 using InterfacePtr = int;
 template<class T> struct AbstractSubscription {
     AbstractSubscription(int, CanardPortID) {}
@@ -32,26 +35,50 @@ struct Motor {
     float kp=17, ki=19;
     int targets=0, gains=0;
     bool valid=true;
+    int servo_type=-1;
+    float servo_value=0;
+    bool set_velocity_point(float v) {servo_type=0; servo_value=v; return valid;}
+    bool set_torque_point(float v) {servo_type=1; servo_value=v; return valid;}
+    bool set_angle_point(float v) {servo_type=2; servo_value=v; return valid;}
+    bool set_voltage_point(float v) {servo_type=3; servo_value=v; return valid;}
     bool set_foc_point(FOCTarget t) {target=t; ++targets; return valid;}
     void set_current_regulator_params(float p,float i) {kp=p; ki=i; ++gains;}
 } device;
 Motor* motor=&device;
 int errors=0;
 void record_invalid_command() {++errors;}
-'''+handler+r'''
+'''+handler+servo_handler+r'''
 int main() {
+    ServoSub servo_sub(0,3418);
+    for (uint8_t type : {0,1,2,3,4,255}) {
+        device=Motor{}; errors=0;
+        voltbro_foc_Servo_1_0 command{};
+        command.set_point_type=type; command.set_point_value=.25f;
+        servo_sub.handler(command,nullptr);
+        if (type<4) {
+            assert(device.servo_type==type && device.servo_value==.25f && errors==0);
+        } else assert(device.servo_type==-1 && errors==1);
+        voltbro_foc_specific_control_1_0 legacy{};
+        legacy.set_point_type=type; legacy.set_point_value=.25f;
+        uint8_t a[5]{},b[5]{}; size_t na=5,nb=5;
+        assert(voltbro_foc_Servo_1_0_serialize_(&command,a,&na)==0);
+        assert(voltbro_foc_specific_control_1_0_serialize_(&legacy,b,&nb)==0);
+        assert(na==5 && nb==5 && std::memcmp(a,b,5)==0);
+    }
+    device=Motor{}; device.valid=false; errors=0;
+    servo_sub.handler({},nullptr); assert(errors==1);
     static_assert(voltbro_foc_command_1_0_EXTENT_BYTES_==28);
     static_assert(voltbro_foc_MITCommand_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_==20);
     FOCCommandSub sub(0,2118);
     for (size_t mtu : {8,12,16,20,24,32,48,64}) {
         // New publisher -> old subscriber: retain the four-field prefix.
-        voltbro_foc_MITState_1_0 state{};
+        voltbro_foc_State_1_0 state{};
         state.timestamp.microsecond=0x123456789ABCDEULL;
         state.pos.radian=1.25f; state.vel.radian_per_second=-2.5f;
         state._torq.newton_meter=3.75f;
-        uint8_t state_payload[voltbro_foc_MITState_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_]{};
+        uint8_t state_payload[voltbro_foc_State_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_]{};
         size_t state_size=sizeof(state_payload);
-        assert(voltbro_foc_MITState_1_0_serialize_(&state,state_payload,&state_size)==0);
+        assert(voltbro_foc_State_1_0_serialize_(&state,state_payload,&state_size)==0);
         assert(state_size==19);
         auto state_alloc=+[](CanardInstance*,size_t n)->void* {return std::malloc(n);};
         auto state_free=+[](CanardInstance*,void* p) {std::free(p);};
@@ -84,7 +111,7 @@ int main() {
                 assert(old_state._torque.newton_meter==state._torq.newton_meter);
                 assert(old_state.current.ampere==0 && old_state.bus_voltage.volt==0);
                 assert(old_state.mcu_temp.kelvin==0 && old_state.stator_temp.kelvin==0 && !old_state.has_fault.value);
-                std::printf("MTU=%zu MITState -> state_simple PASS\n",mtu);
+                std::printf("MTU=%zu State -> state_simple PASS\n",mtu);
                 state_free(&state_rx,transfer.payload);
             }
             state_free(&state_tx,canardTxPop(&state_queue,item));

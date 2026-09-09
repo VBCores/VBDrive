@@ -48,7 +48,13 @@ enum class ParameterId : uint8_t {
     TEMP_STATOR,
     IS_FAULT,
     ENCODER_SHAFT,
-    ENCODER_ROTOR
+    ENCODER_ROTOR,
+    SERVO_POS_P_GAIN,
+    SERVO_POS_I_GAIN,
+    SERVO_VEL_P_GAIN,
+    SERVO_VEL_I_GAIN,
+    SERVO_TR_FORM,
+    SERVO_TR_VEL
 };
 
 struct ParameterDefinition {
@@ -72,7 +78,7 @@ enum class ParameterWriteResult : uint8_t {
     UNAVAILABLE
 };
 
-inline constexpr std::array<ParameterDefinition, 33> PARAMETER_CATALOG{{
+inline constexpr std::array<ParameterDefinition, 39> PARAMETER_CATALOG{{
     {ParameterId::GEAR,          "gear",          ParameterType::NATURAL32, true,  true},
     {ParameterId::MAX_I,         "max_i",         ParameterType::REAL32,    true,  true},
     {ParameterId::MAX_SPD,       "max_spd",       ParameterType::REAL32,    true,  true},
@@ -106,11 +112,17 @@ inline constexpr std::array<ParameterDefinition, 33> PARAMETER_CATALOG{{
     {ParameterId::IS_FAULT,      "is_fault",      ParameterType::BIT,       false, false},
     {ParameterId::ENCODER_SHAFT, "encoder_shaft", ParameterType::NATURAL32, false, false},
     {ParameterId::ENCODER_ROTOR, "encoder_rotor", ParameterType::NATURAL32, false, false},
+    {ParameterId::SERVO_POS_P_GAIN, "servo_pos_p_gain", ParameterType::REAL32, true, true},
+    {ParameterId::SERVO_POS_I_GAIN, "servo_pos_i_gain", ParameterType::REAL32, true, true},
+    {ParameterId::SERVO_VEL_P_GAIN, "servo_vel_p_gain", ParameterType::REAL32, true, true},
+    {ParameterId::SERVO_VEL_I_GAIN, "servo_vel_i_gain", ParameterType::REAL32, true, true},
+    {ParameterId::SERVO_TR_FORM, "servo_tr_form", ParameterType::NATURAL32, true, true},
+    {ParameterId::SERVO_TR_VEL, "servo_tr_vel", ParameterType::REAL32, true, true},
 }};
 
 consteval bool parameter_catalog_is_valid() {
     for (size_t i = 0; i < PARAMETER_CATALOG.size(); ++i) {
-        if (PARAMETER_CATALOG[i].name.empty() || PARAMETER_CATALOG[i].name.size() > 15) {
+        if (PARAMETER_CATALOG[i].name.empty() || PARAMETER_CATALOG[i].name.size() > 16) {
             return false;
         }
         for (size_t j = i + 1; j < PARAMETER_CATALOG.size(); ++j) {

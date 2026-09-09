@@ -4,6 +4,80 @@
 >
 > [Buy here]()
 
+## Configuration Parameters (Serial and Cyphal)
+
+| Parameter  | Description                                               | Type    | Example Values |
+| ---------- | --------------------------------------------------------- | ------- | -------------- |
+| `gear`     | Gear ratio of the drive                                   | Integer | `1`, `5`, `15` |
+| `max_i`    | Maximum motor current (A)                                 | Float   | `5.0`, `10.5`  |
+| `max_spd`  | Maximum motor speed (rad)                                 | Float   | `1000.0`       |
+| `max_tq`   | Maximum torque output (Nm)                                | Float   | `1.2`          |
+| `ang_off`  | Joint angle offset (rad)                                  | Float   | `0.0`, `15.5`  |
+| `ang_dir`  | Joint angle direction multiplier, -1 or +1 | Integer | `1`, `-1` |
+| `min_ang`  | Minimum allowed angle (rad)                               | Float   | `-30.0`        |
+| `max_ang`  | Maximum allowed angle (rad)                               | Float   | `30.0`         |
+| `kt`       | Torque constant (Nm/A)                                    | Float   | `0.12`         |
+| `kp`       | Current proportional gain                                 | Float   | `0.25`         |
+| `ki`       | Current integral gain                                     | Float   | `0.01`         |
+| `kd`       | Current derivative gain                                   | Float   | `0.005`        |
+| `flt_a`    | Main filter parameter A                                   | Float   | `0.5`          |
+| `flt_g1`   | Filter gain 1                                             | Float   | `0.1`          |
+| `flt_g2`   | Filter gain 2                                             | Float   | `0.1`          |
+| `flt_g3`   | Filter gain 3                                             | Float   | `0.1`          |
+| `i_lpf`    | Current low-pass filter coefficient                       | Float   | `0.1`          |
+| `ang_enc`  | Angle encoder type enum, 0 rotor, 1 - shaft               | Integer | `0`, `1`.      |
+| `node_id`  | Cyphal/CAN node ID                                        | Integer | `1`, `42`      |
+| `data_baud`   | FDCAN data baud rate enum (see below) | Enum    | `0`, `1`, `2`  |
+| `nominal_baud`   | FDCAN nominal baud rate enum (see below) | Enum | `3`, `4`       |
+
+### Servo Parameters
+
+Servo parameters are shared Serial/Cyphal read/write persistent registers:
+
+| Name | Type | Default |
+| --- | --- | --- |
+| `servo_pos_p_gain` | real32 | 0 |
+| `servo_pos_i_gain` | real32 | 0 |
+| `servo_vel_p_gain` | real32 | 0 |
+| `servo_vel_i_gain` | real32 | 0 |
+| `servo_tr_form` | natural32 | 1 (`LINE_TRAJ`; 2 = `POLYNOM_TRAJ`) |
+| `servo_tr_vel` | real32 | 0 |
+
+Gains and transient velocity must be finite and non-negative. This change implements
+communication and persistence only: these values do not yet alter Servo control or
+generate trajectories. Existing Servo setpoint handling is unchanged. Its wire format
+matches legacy `specific_control` for modes 0–3; other modes are rejected.
+Serial writes require CONFIG and SAVE/APPLY; EXIT discards them. Cyphal writes are
+saved by the existing deferred-save path. Names are string views (up to 16 characters),
+not heap-allocated strings. The composite `servo_params` register is not used.
+
+All settings, including Servo, are stored in one 98-byte config at EEPROM offset 0.
+Calibration starts at 99, followed by encoder state. There is no old-layout migration.
+Provision devices with erased external EEPROM, then configure and calibrate afresh;
+flashing MCU firmware alone does not erase external EEPROM.
+
+
+---
+
+### **FDCAN Baud Rate Configuration**
+
+| parameter           | Value Name | Speed    | Numeric Value |
+|---------------------|------------|----------|---------------|
+| `nominal_baud`            | `KHz62`    | 62.5 kHz | `0`           |
+|                     | `KHz125`   | 125 kHz  | `1`           |
+|                     | `KHz250`   | 250 kHz  | `2`           |
+|                     | `KHz500`   | 500 kHz  | `3`           |
+|                     | `KHz1000`  | 1 MHz    | `4`           |
+|---------------------|------------|----------|---------------|
+| `data_baud`            | `KHz1000`  | 1 MHz    | `0`           |
+|                     | `KHz2000`  | 2 MHz    | `1`           |
+|                     | `KHz4000`  | 4 MHz    | `2`           |
+|                     | `KHz8000`  | 8 MHz    | `3`           |
+
+`nominal_baud` and `data_baud` are available through both Serial and Cyphal. Writes update EEPROM configuration; active CAN timing changes only after reboot.
+
+---
+
 ## UART Configuration / Test Interface
 
 The board uses a UART-based serial interface for configuration, calibration, test control, and debug logging.
@@ -40,53 +114,6 @@ The board uses a UART-based serial interface for configuration, calibration, tes
 | `CALIBRATE` | RUNNING, NOT_CALIBRATED | Run calibration action |
 | `TEST` | RUNNING | Enter test mode |
 | `STOP` | TEST | Exit test mode, clear FOC target, stop test logging |
-
----
-
-### **Configuration Parameters**
-
-| Parameter  | Description                                               | Type    | Example Values |
-| ---------- | --------------------------------------------------------- | ------- | -------------- |
-| `gear`     | Gear ratio of the drive                                   | Integer | `1`, `5`, `15` |
-| `max_i`    | Maximum motor current (A)                                 | Float   | `5.0`, `10.5`  |
-| `max_spd`  | Maximum motor speed (rad)                                 | Float   | `1000.0`       |
-| `max_tq`   | Maximum torque output (Nm)                                | Float   | `1.2`          |
-| `ang_off`  | Joint angle offset (rad)                                  | Float   | `0.0`, `15.5`  |
-| `ang_dir`  | Joint angle direction multiplier, -1 or +1 | Integer | `1`, `-1` |
-| `min_ang`  | Minimum allowed angle (rad)                               | Float   | `-30.0`        |
-| `max_ang`  | Maximum allowed angle (rad)                               | Float   | `30.0`         |
-| `kt`       | Torque constant (Nm/A)                                    | Float   | `0.12`         |
-| `kp`       | Current proportional gain                                 | Float   | `0.25`         |
-| `ki`       | Current integral gain                                     | Float   | `0.01`         |
-| `kd`       | Current derivative gain                                   | Float   | `0.005`        |
-| `flt_a`    | Main filter parameter A                                   | Float   | `0.5`          |
-| `flt_g1`   | Filter gain 1                                             | Float   | `0.1`          |
-| `flt_g2`   | Filter gain 2                                             | Float   | `0.1`          |
-| `flt_g3`   | Filter gain 3                                             | Float   | `0.1`          |
-| `i_lpf`    | Current low-pass filter coefficient                       | Float   | `0.1`          |
-| `ang_enc`  | Angle encoder type enum, 0 rotor, 1 - shaft               | Integer | `0`, `1`.      |
-| `node_id`  | Cyphal/CAN node ID                                        | Integer | `1`, `42`      |
-| `data_baud`   | FDCAN data baud rate enum (see below) | Enum    | `0`, `1`, `2`  |
-| `nominal_baud`   | FDCAN nominal baud rate enum (see below) | Enum | `3`, `4`       |
-
----
-
-### **FDCAN Baud Rate Configuration**
-
-| parameter           | Value Name | Speed    | Numeric Value |
-|---------------------|------------|----------|---------------|
-| `nominal_baud`            | `KHz62`    | 62.5 kHz | `0`           |
-|                     | `KHz125`   | 125 kHz  | `1`           |
-|                     | `KHz250`   | 250 kHz  | `2`           |
-|                     | `KHz500`   | 500 kHz  | `3`           |
-|                     | `KHz1000`  | 1 MHz    | `4`           |
-|---------------------|------------|----------|---------------|
-| `data_baud`            | `KHz1000`  | 1 MHz    | `0`           |
-|                     | `KHz2000`  | 2 MHz    | `1`           |
-|                     | `KHz4000`  | 4 MHz    | `2`           |
-|                     | `KHz8000`  | 8 MHz    | `3`           |
-
-`nominal_baud` and `data_baud` are available through both Serial and Cyphal. Writes update EEPROM configuration; active CAN timing changes only after reboot.
 
 ---
 
@@ -155,45 +182,49 @@ The BLDC Motor Controller communicates over **Cyphal/FDCAN** to publish real-tim
 
 > We use some custom datatypes, see here: [VoltBro cyphal types repository](https://github.com/voltbro/cyphal-types)
 
+<details>
+  <summary>Note on backwards compatibility</summary>
+
+  1. `State.1.0` preserves the first four fields of `state_simple.1.0` on the wire.
+  Legacy clients can still read timestamp, angle, velocity and torque; the removed
+  current, voltage, temperature and fault fields decode as zeros, not measurements.
+  Read those measurements through the Cyphal registers instead.
+  2. Old clients can still send the 28-byte legacy
+`command.1.0`, motor will ignore its trailing `I_kp`/`I_ki`. Both formats leave the current
+gains unchanged. This compatibility is for old clients
+with new firmware; new clients with old firmware are not supported.
+
+</details>
+
 ### **Published Messages**
 
 | Port ID | Message Type                              | Interval | Description                                   |
 | ------- | ----------------------------------------- | -------- | --------------------------------------------- |
-| `3811`  | `voltbro.foc.MITState.1.0`               | 1 ms     | Timestamp, position, velocity, torque        |
+| `3811`  | `voltbro.foc.State.1.0`               | 1 ms     | Timestamp, position, velocity, torque        |
 
 ---
 
 ### **Subscribed Messages**
 
-`MITState.1.0` preserves the first four fields of `state_simple.1.0` on the wire.
-Legacy clients can still read timestamp, angle, velocity and torque; the removed
-current, voltage, temperature and fault fields decode as zeros, not measurements.
-Read those measurements through the shared registers instead.
 
 | Port ID Formula  | Message Type                       | Description                                                                 |
 | ---------------- | ---------------------------------- | --------------------------------------------------------------------------- |
-| `2107 + node_id` | `voltbro.foc.MITCommand.1.0` (also legacy `voltbro.foc.command.1.0`) | Torque, position, velocity, position gain and velocity gain |
-| `3407 + node_id` | `voltbro.foc.specific_control.1.0` | High-level, single parameter control setpoint                               |
+| `2107 + node_id` | `voltbro.foc.MITCommand.1.0` | Torque, position, velocity, position gain and velocity gain |
+| `3407 + node_id` | `voltbro.foc.Servo.1.0` | VELOCITY=0, TORQUE=1, POSITION=2, VOLTAGE=3; uint8 type, float32 value |
 
-`MITCommand.1.0` serializes `torq`, `pos`, `vel`, `pos_gain`, `vel_gain` in that
-order (20 bytes). The existing subscription also accepts the 28-byte legacy
-`command.1.0`, ignoring its trailing `I_kp`/`I_ki`. Both formats leave the current
-gains unchanged. This compatibility is for old clients
-with new firmware; new clients with old firmware are not supported. CAN FD
-padding is accounted for without adding a second subscription.
 
 ---
 
 ### **Registers**
 
-All registers are shared between Cyphal and Serial interfaces, except `bootloader` and `cmd_errors`, which are Cyphal-only. All configuration parameters listed above are mutable and persistent. Integer parameters use `natural32`, except `ang_dir` (`integer32`); floating-point parameters use `real32`.
+All configuration parameters are shared between Cyphal and Serial interfaces, except `bootloader` and `cmd_errors`, which are Cyphal-only. All config params listed at the top of README are mutable and persistent. Integer parameters use `natural32`, except `ang_dir` (`integer32`); floating-point parameters use `real32`.
 
-The remaining parameters are non-persistent:
+The remaining runtime registers are non-persistent and Cyphal-exclusive:
 
 | Name | Cyphal type | Access | Meaning |
 | --- | --- | --- | --- |
 | `is_on` | bit | read/write | Driver enable; Serial writes 0/1 in RUNNING |
-| `bootloader` | bit | read/write | Cyphal-only; writing true requests VBBoot. Serial retains the separate `BOOT` command |
+| `bootloader` | bit | read/write | Writing `true` reboots drive into VBBoot bootloader |
 | `cmd_errors` | natural32 | read-only | Cyphal-only; number of rejected Cyphal movement commands |
 | `vbdrive_model` | string | read-only | CMake constant `M4310` |
 | `firmware_rev` | string | read-only | 16 hexadecimal digits of the VBDrive HEAD commit |
@@ -218,7 +249,7 @@ Persistent register writes are queued and saved to EEPROM from the main loop. Th
 All joint-angle values exposed over Cyphal use the same corrected frame:
 
 * `reported_angle = measured_shaft_angle * ang_dir + ang_off`
-* `voltbro.foc.command.angle`, `voltbro.foc.specific_control` position targets, `min_ang`, and `max_ang` are all interpreted in that corrected frame
+* `voltbro.foc.MITCommand.pos`, `voltbro.foc.Servo` position targets, `min_ang`, and `max_ang` are all interpreted in that corrected frame
 * Positive `ang_off` increases the reported and commanded joint angle for the same physical shaft position
 * Units are radians
 
@@ -261,4 +292,5 @@ Initialize submodules before configuring. DSDL C headers and C++ traits are gene
 
 After a Release build, run `python3 tests/parameter_interfaces.py` for host regressions against the actual parameter implementation, Serial state controller and Cyphal callback (hardware/transport doubles).
 
-The current main uses configuration type `0x44AAABFF` at EEPROM offset zero, followed by calibration. This differs from older VBDrive firmware. Back up configuration and calibration before flashing an older device; do not assume its EEPROM is layout-compatible.
+The bootloader-compatible configuration prefix uses type `0x44AAABFF`. Only fresh
+EEPROM provisioning is supported; existing configuration/calibration layouts are not migrated.

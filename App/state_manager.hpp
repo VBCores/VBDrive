@@ -48,6 +48,12 @@ struct __attribute__((packed)) VBDriveConfig: public BaseConfigData {
     float filter_g3 = NAN;
     float I_lpf_coefficient = NAN;
     AngleEncoderType angle_encoder = AngleEncoderType::ROTOR;
+    float servo_pos_p_gain = 0;
+    float servo_pos_i_gain = 0;
+    float servo_vel_p_gain = 0;
+    float servo_vel_i_gain = 0;
+    uint32_t servo_transient_form = 1; // LINE_TRAJ=1, POLYNOM_TRAJ=2; not implemented yet.
+    float servo_transient_vel = 0;
 
     VBDriveConfig(): BaseConfigData() {
         type_id = VBDriveConfig::TYPE_ID;

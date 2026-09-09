@@ -24,9 +24,9 @@ parser.add_argument('--output', type=Path, required=True)
 args = parser.parse_args()
 schema = re.findall(r'\{ParameterId::\w+,\s*"([^"]+)",\s*ParameterType::(\w+),\s*(true|false),\s*(true|false)',
                     (Path(__file__).resolve().parents[1] / 'App/parameters.hpp').read_text())
-assert len(schema) == 33
+assert len(schema) == 39
 schema = [entry for entry in schema if entry[0] not in ('bootloader', 'cmd_errors')]
-assert len(schema) == 31
+assert len(schema) == 37
 fd = os.open(args.port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
 tty.setraw(fd)
 attrs = termios.tcgetattr(fd)

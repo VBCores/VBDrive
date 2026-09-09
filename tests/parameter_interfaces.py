@@ -21,12 +21,14 @@ STUB = r'''
 #include <cstdio>
 #include <climits>
 #include <algorithm>
+#include <array>
 #include <string>
 #include <string_view>
 #include <cstdint>
 #define arm_atomic(T) T
 #define HAL_UART_MODULE_ENABLED
 #define HAL_OK 0
+using HAL_StatusTypeDef = int;
 #define HAL_UART_STATE_BUSY 99
 using CanardNodeID = uint8_t;
 constexpr unsigned CANARD_NODE_ID_MAX = 127;
@@ -43,8 +45,16 @@ inline void Error_Handler() { assert(false); }
 #define npf_vsnprintf vsnprintf
 struct EEPROM {
     int writes = 0;
-    template<class T> int write(T*,size_t) { ++writes; return 0; }
-    template<class T> int read(T*,size_t) { return 0; }
+    std::array<uint8_t,16384> memory{};
+    template<class T> int write(T* value,uint16_t address) {
+        if (address==0) ++writes;
+        assert(address+sizeof(T)<=memory.size());
+        std::memcpy(memory.data()+address,value,sizeof(T)); return 0;
+    }
+    template<class T> int read(T* value,uint16_t address) {
+        assert(address+sizeof(T)<=memory.size());
+        std::memcpy(value,memory.data()+address,sizeof(T)); return 0;
+    }
 };
 enum class AngleEncoderType : uint8_t { ROTOR, SHAFT };
 struct CalibrationData { char bytes[8]; };
@@ -84,8 +94,8 @@ std::string command(std::string_view s) {
     uart_output.clear(); manager.process_command(s); return uart_output;
 }
 int main() {
-    static_assert(sizeof(VBDriveConfig)==74);
-    static_assert(CONFIG_PLACEMENT==0 && CALIBRATION_PLACEMENT==75);
+    static_assert(sizeof(VBDriveConfig)==98);
+    static_assert(CONFIG_PLACEMENT==0 && CALIBRATION_PLACEMENT==99);
     auto& config = manager.get_config();
     config.node_id=11; config.gear_ratio=36; config.was_configured=true;
     manager.set_state(CommandState::RUNNING);
@@ -181,7 +191,30 @@ int main() {
     fill_register_bit(input,true); access("bootloader",input);
     assert(bootloader_reboot_pending); reboot_to_bootloader_if_requested(); assert(boots==1);
     command("BOOT"); assert(boots==2);
-    puts("PASS: 31 shared parameters, 2 Cyphal-only registers, Serial CONFIG/EXIT/SAVE/TEST, typed Cyphal read/write, deferred persistence, blank-motor setup, boot commands");
+    // All six Servo fields persist in the same config write.
+    std::fill(eeprom.memory.begin()+sizeof(VBDriveConfig),eeprom.memory.end(),0xA5);
+    command("CONFIG");
+    command("servo_pos_p_gain:1"); command("servo_pos_i_gain:2");
+    command("servo_vel_p_gain:3"); command("servo_vel_i_gain:4");
+    command("servo_tr_form:2"); command("servo_tr_vel:5");
+    command("SAVE");
+    VBDriveConfig loaded;
+    assert(eeprom.read(&loaded,0)==HAL_OK);
+    assert(loaded.gear_ratio==config.gear_ratio && loaded.servo_pos_p_gain==1);
+    assert(loaded.servo_pos_i_gain==2 && loaded.servo_vel_p_gain==3 && loaded.servo_vel_i_gain==4);
+    assert(loaded.servo_transient_form==2 && loaded.servo_transient_vel==5);
+    command("CONFIG"); command("RESET");
+    assert(config.servo_pos_p_gain==0 && config.servo_transient_form==1);
+    command("EXIT");
+    assert(config.servo_pos_p_gain==1 && config.servo_transient_form==2);
+    for (size_t i=sizeof(VBDriveConfig);i<eeprom.memory.size();++i) assert(eeprom.memory[i]==0xA5);
+    for (auto name : {"servo_pos_p_gain","servo_pos_i_gain","servo_vel_p_gain","servo_vel_i_gain","servo_tr_vel"}) {
+        auto* d=find_parameter(name);
+        assert(write_persistent_parameter(config,d->id,-1.0f,false)==ParameterWriteResult::INVALID);
+        assert(write_persistent_parameter(config,d->id,NAN,false)==ParameterWriteResult::INVALID);
+    }
+    assert(write_persistent_parameter(config,ParameterId::SERVO_TR_FORM,uint32_t(3),false)==ParameterWriteResult::INVALID);
+    puts("PASS: 37 shared parameters, 2 Cyphal-only registers, Serial/Cyphal writes and rollback, unified config persistence, boot commands");
 }
 '''
 

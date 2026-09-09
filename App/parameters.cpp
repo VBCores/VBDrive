@@ -1,5 +1,6 @@
 #include "app.h"
 #include "parameters.hpp"
+#include <cmath>
 
 #ifndef VBDRIVE_MODEL
 #error "VBDRIVE_MODEL must be defined by CMake"
@@ -27,6 +28,12 @@ void record_invalid_command() {
 bool read_parameter(const VBDriveConfig& config, ParameterId id, ParameterValue& value) {
     value = {};
     switch (id) {
+        case ParameterId::SERVO_POS_P_GAIN: value = config.servo_pos_p_gain; return true;
+        case ParameterId::SERVO_POS_I_GAIN: value = config.servo_pos_i_gain; return true;
+        case ParameterId::SERVO_VEL_P_GAIN: value = config.servo_vel_p_gain; return true;
+        case ParameterId::SERVO_VEL_I_GAIN: value = config.servo_vel_i_gain; return true;
+        case ParameterId::SERVO_TR_FORM: value = config.servo_transient_form; return true;
+        case ParameterId::SERVO_TR_VEL: value = config.servo_transient_vel; return true;
         case ParameterId::ANG_DIR:
             value.emplace<int32_t>(config.angle_direction == -1 ? -1 : 1);
             return true;
@@ -148,6 +155,25 @@ ParameterWriteResult write_persistent_parameter(
     const ParameterValue& value,
     bool apply_runtime
 ) {
+    if (id >= ParameterId::SERVO_POS_P_GAIN && id <= ParameterId::SERVO_TR_VEL) {
+        if (id == ParameterId::SERVO_TR_FORM) {
+            const auto form = std::get<uint32_t>(value);
+            if (form != 1 && form != 2) return ParameterWriteResult::INVALID;
+            config.servo_transient_form = form;
+        } else {
+            const float gain = std::get<float>(value);
+            if (!std::isfinite(gain) || gain < 0) return ParameterWriteResult::INVALID;
+            switch (id) {
+                case ParameterId::SERVO_POS_P_GAIN: config.servo_pos_p_gain = gain; break;
+                case ParameterId::SERVO_POS_I_GAIN: config.servo_pos_i_gain = gain; break;
+                case ParameterId::SERVO_VEL_P_GAIN: config.servo_vel_p_gain = gain; break;
+                case ParameterId::SERVO_VEL_I_GAIN: config.servo_vel_i_gain = gain; break;
+                case ParameterId::SERVO_TR_VEL: config.servo_transient_vel = gain; break;
+                default: break;
+            }
+        }
+        return ParameterWriteResult::OK;
+    }
     if (id == ParameterId::ANG_DIR && std::get<int32_t>(value) != -1 && std::get<int32_t>(value) != 1) {
         return ParameterWriteResult::INVALID;
     }

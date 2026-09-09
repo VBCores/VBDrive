@@ -26,8 +26,8 @@
 #include <uavcan/si/unit/torque/Scalar_1_0.hpp>
 #include <uavcan/si/unit/voltage/Scalar_1_0.hpp>
 #include <voltbro/foc/MITCommand_1_0.hpp>
-#include <voltbro/foc/specific_control_1_0.hpp>
-#include <voltbro/foc/MITState_1_0.hpp>
+#include <voltbro/foc/Servo_1_0.hpp>
+#include <voltbro/foc/State_1_0.hpp>
 
 #include <voltbro/eeprom/eeprom.hpp>
 #include <voltbro/encoders/ASxxxx/AS5047P.hpp>
@@ -351,11 +351,10 @@ void app() {
 
 #ifndef NO_CYPHAL
 //#pragma region Cyphal
-using SpecificControl = voltbro_foc_specific_control_1_0;
 
 static constexpr CanardPortID FOC_COMMAND_PORT = 2107;
 static constexpr CanardPortID FOC_STATE_PORT = 3811;
-static constexpr CanardPortID SPECIFIC_CONTROL_PORT = 3407;
+static constexpr CanardPortID SERVO_PORT = 3407;
 
 static bool config_save_pending = false;
 
@@ -384,7 +383,7 @@ void in_loop_reporting(millis current_t) {
 
     static millis report_time = 0;
     EACH_N(current_t, report_time, 1, {
-        voltbro_foc_MITState_1_0 state_msg = {};
+        voltbro_foc_State_1_0 state_msg = {};
 
         state_msg.timestamp.microsecond = system_time();
 
@@ -417,26 +416,26 @@ public:
     }
 };
 
-class SpecificControlSub: public AbstractSubscription<SpecificControl> {
+class ServoSub: public AbstractSubscription<voltbro_foc_Servo_1_0> {
 public:
-    SpecificControlSub(InterfacePtr interface, CanardPortID port_id): AbstractSubscription<SpecificControl>(interface, port_id) {};
+    ServoSub(InterfacePtr interface, CanardPortID port_id): AbstractSubscription<voltbro_foc_Servo_1_0>(interface, port_id) {};
     #pragma GCC diagnostic push
     #pragma GCC diagnostic ignored "-Wunused-parameter"
     // NOTE: transfer parameter required by the interface, but not used in this implementation
-    void handler(const SpecificControl& msg, CanardRxTransfer* _) override {
+    void handler(const voltbro_foc_Servo_1_0& msg, CanardRxTransfer* _) override {
     #pragma GCC diagnostic pop
         bool is_valid = false;
         switch (msg.set_point_type){
-            case voltbro_foc_specific_control_1_0_VELOCITY:
+            case voltbro_foc_Servo_1_0_VELOCITY:
                 is_valid = motor->set_velocity_point(msg.set_point_value);
                 break;
-            case voltbro_foc_specific_control_1_0_TORQUE:
+            case voltbro_foc_Servo_1_0_TORQUE:
                 is_valid = motor->set_torque_point(msg.set_point_value);
                 break;
-            case voltbro_foc_specific_control_1_0_POSITION:
+            case voltbro_foc_Servo_1_0_POSITION:
                 is_valid = motor->set_angle_point(msg.set_point_value);
                 break;
-            case voltbro_foc_specific_control_1_0_VOLTAGE:
+            case voltbro_foc_Servo_1_0_VOLTAGE:
                 is_valid = motor->set_voltage_point(msg.set_point_value);
                 break;
             default:
@@ -452,7 +451,7 @@ public:
 ReservedObject<NodeInfoReader> node_info_reader;
 ReservedObject<RegistersHandler<PARAMETER_CATALOG.size(), StaticRegisters<PARAMETER_CATALOG.size()>>> registers_handler;
 ReservedObject<FOCCommandSub> foc_command_sub;
-ReservedObject<SpecificControlSub> specific_control_sub;
+ReservedObject<ServoSub> servo_sub;
 
 static void handle_parameter_register(
     size_t index,
@@ -566,7 +565,7 @@ void setup_subscriptions() {
         VBDRIVE_VCS_REVISION_ID
     );
 
-    specific_control_sub.create(cyphal_interface, SPECIFIC_CONTROL_PORT + node_id);
+    servo_sub.create(cyphal_interface, SERVO_PORT + node_id);
     foc_command_sub.create(cyphal_interface, FOC_COMMAND_PORT + node_id);
 
     HAL_IMPORTANT(apply_filter(
@@ -590,7 +589,7 @@ void setup_subscriptions() {
     HAL_IMPORTANT(apply_filter(
         3,
         &hfdcan1,
-        specific_control_sub->make_filter(node_id)
+        servo_sub->make_filter(node_id)
     ))
 }
 //#pragma endregion
