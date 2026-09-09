@@ -93,7 +93,8 @@ int main() {
     for (size_t i=0; i<PARAMETER_CATALOG.size();++i) {
         const auto& d=PARAMETER_CATALOG[i];
         auto q=command(std::string(d.name)+":?");
-        assert(q.find(std::string(d.name)+":")==0);
+        const bool serial = d.id != ParameterId::BOOTLOADER && d.id != ParameterId::CMD_ERRORS;
+        assert(serial ? q.find(std::string(d.name)+":")==0 : q.find("Unknown parameter")!=std::string::npos);
         uavcan_register_Value_1_0 in{},out{}; RegisterAccessResponse response{};
         handle_parameter_register(i,in,out,response);
         assert(out._tag_!=REGISTER_EMPTY_TAG);
@@ -107,7 +108,7 @@ int main() {
             case ParameterType::STRING: assert(std::string_view(reinterpret_cast<char*>(out._string.value.elements),out._string.value.count)==std::get<std::string_view>(value)); break;
         }
         if (!d.is_mutable) {
-            assert(command(std::string(d.name)+":1").find("Read-only")!=std::string::npos);
+            assert(command(std::string(d.name)+":1").find(serial ? "Read-only" : "Unknown parameter")!=std::string::npos);
             fill_register_natural32(in,999); handle_parameter_register(i,in,out,response);
             ParameterValue after; assert(read_parameter(config,d.id,after)); assert(value==after);
         }
@@ -163,10 +164,24 @@ int main() {
     fill_register_integer32(input,0); access("is_on",input); assert(!device.on);
     motor=nullptr; fill_register_natural32(input,13); access("node_id",input); assert(config.node_id==13);
     assert(access("encoder_rotor",{})._tag_==REGISTER_EMPTY_TAG); motor=&device;
-    command("bootloader:0"); assert(!bootloader_reboot_pending);
-    command("bootloader:1"); assert(bootloader_reboot_pending); reboot_to_bootloader_if_requested(); assert(boots==1);
+    for (auto state : {CommandState::RUNNING, CommandState::CONFIG, CommandState::TESTING}) {
+        manager.set_state(state);
+        for (auto name : {"bootloader", "cmd_errors"}) {
+            for (auto value : {"?", "0", "1"}) {
+                assert(command(std::string(name)+":"+value).find("Unknown parameter")!=std::string::npos);
+            }
+        }
+        for (const auto& d : PARAMETER_CATALOG) {
+            if (d.id != ParameterId::BOOTLOADER && d.id != ParameterId::CMD_ERRORS)
+                assert(command(std::string(d.name)+":?").find(std::string(d.name)+":")==0);
+        }
+        assert(!bootloader_reboot_pending && boots==0);
+    }
+    manager.set_state(CommandState::RUNNING);
+    fill_register_bit(input,true); access("bootloader",input);
+    assert(bootloader_reboot_pending); reboot_to_bootloader_if_requested(); assert(boots==1);
     command("BOOT"); assert(boots==2);
-    puts("PASS: 33 shared parameters, Serial CONFIG/EXIT/SAVE/TEST, typed Cyphal read/write, deferred persistence, blank-motor setup, boot commands");
+    puts("PASS: 31 shared parameters, 2 Cyphal-only registers, Serial CONFIG/EXIT/SAVE/TEST, typed Cyphal read/write, deferred persistence, blank-motor setup, boot commands");
 }
 '''
 

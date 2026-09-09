@@ -174,15 +174,15 @@ The BLDC Motor Controller communicates over **Cyphal/FDCAN** to publish real-tim
 
 ### **Registers**
 
-Serial and Cyphal share the 33-entry catalog in `App/parameters.hpp`. All configuration parameters listed above are mutable and persistent. Integer parameters use `natural32`, except `ang_dir` (`integer32`); floating-point parameters use `real32`. Old dotted register names and `n_baud`/`d_baud` aliases are no longer accepted.
+All registers are shared between Cyphal and Serial interfaces, except `bootloader` and `cmd_errors`, which are Cyphal-only. All configuration parameters listed above are mutable and persistent. Integer parameters use `natural32`, except `ang_dir` (`integer32`); floating-point parameters use `real32`.
 
 The remaining parameters are non-persistent:
 
 | Name | Cyphal type | Access | Meaning |
 | --- | --- | --- | --- |
 | `is_on` | bit | read/write | Driver enable; Serial writes 0/1 in RUNNING |
-| `bootloader` | bit | read/write | Writing true requests VBBoot; Serial also retains `BOOT` |
-| `cmd_errors` | natural32 | read-only | Rejected Cyphal movement commands |
+| `bootloader` | bit | read/write | Cyphal-only; writing true requests VBBoot. Serial retains the separate `BOOT` command |
+| `cmd_errors` | natural32 | read-only | Cyphal-only; number of rejected Cyphal movement commands |
 | `vbdrive_model` | string | read-only | CMake constant `M4310` |
 | `firmware_rev` | string | read-only | 16 hexadecimal digits of the VBDrive HEAD commit |
 | `bus_voltage` | real32 | read-only | Bus voltage, V |

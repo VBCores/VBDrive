@@ -148,6 +148,10 @@ public:
                 return;
             }
             const auto* definition = find_parameter(param);
+            if (definition && !definition->available_in_serial()) {
+                responses.append("ERROR: Unknown parameter\n\r");
+                return;
+            }
             if (!definition && BaseConfigurator::app_state != CommandState::TESTING) {
                 responses.append("ERROR: Unknown parameter\n\r");
                 return;

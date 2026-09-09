@@ -57,6 +57,10 @@ struct ParameterDefinition {
     ParameterType type;
     bool is_mutable;
     bool is_persistent;
+
+    constexpr bool available_in_serial() const {
+        return id != ParameterId::BOOTLOADER && id != ParameterId::CMD_ERRORS;
+    }
 };
 
 using ParameterValue = std::variant<uint32_t, int32_t, float, bool, std::string_view>;

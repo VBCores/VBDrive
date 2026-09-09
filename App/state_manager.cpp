@@ -178,7 +178,7 @@ void VBDriveConfig::print_self(UARTResponseAccumulator& responses) {
 
 void VBDriveConfig::get(std::string_view param, UARTResponseAccumulator& responses) {
     const auto* definition = find_parameter(param);
-    if (!definition) {
+    if (!definition || !definition->available_in_serial()) {
         responses.append("ERROR: Unknown parameter\n\r");
         return;
     }
@@ -208,7 +208,7 @@ void VBDriveConfig::get(std::string_view param, UARTResponseAccumulator& respons
 
 bool VBDriveConfig::set(std::string_view param, std::string_view input, UARTResponseAccumulator& responses, bool apply_runtime) {
     const auto* definition = find_parameter(param);
-    if (!definition) {
+    if (!definition || !definition->available_in_serial()) {
         responses.append("ERROR: Unknown parameter\n\r");
         return false;
     }

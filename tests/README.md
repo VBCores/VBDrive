@@ -3,7 +3,9 @@
 Run `python3 tests/parameter_interfaces.py` after generating the Release DSDL headers.
 The test compiles the actual parameter implementation, Serial controller and Cyphal
 register callback with host hardware/transport doubles. It checks all 33 reads and
-types, every persistent parameter's Serial write/EXIT rollback and Cyphal write,
+types (31 shared parameters plus Cyphal-only `bootloader` and `cmd_errors`),
+rejection of both Cyphal-only names in every Serial mode, every persistent
+parameter's Serial write/EXIT rollback and Cyphal write,
 readonly write rejection, CONFIG snapshots, RESET rollback, SAVE after an invalid
 write, TEST commands/live angle limits, numeric validation, delayed EEPROM writes,
 configuration before motor creation and both boot commands. The EEPROM config size

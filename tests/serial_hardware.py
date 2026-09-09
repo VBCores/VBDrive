@@ -25,6 +25,8 @@ args = parser.parse_args()
 schema = re.findall(r'\{ParameterId::\w+,\s*"([^"]+)",\s*ParameterType::(\w+),\s*(true|false),\s*(true|false)',
                     (Path(__file__).resolve().parents[1] / 'App/parameters.hpp').read_text())
 assert len(schema) == 33
+schema = [entry for entry in schema if entry[0] not in ('bootloader', 'cmd_errors')]
+assert len(schema) == 31
 fd = os.open(args.port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
 tty.setraw(fd)
 attrs = termios.tcgetattr(fd)
@@ -115,7 +117,8 @@ try:
     command('log_off')
     assert 'No effort' in command('do_free')
     assert 'Stopping TEST' in command('STOP'); in_test = False
-    assert read('cmd_errors') == original['cmd_errors']
+    for name in ('bootloader', 'cmd_errors'):
+        assert 'Unknown parameter' in command(name+':?')
     passed = True
 finally:
     if in_config: command('EXIT')
