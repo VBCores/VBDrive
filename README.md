@@ -309,18 +309,7 @@ The controller also publishes standard Cyphal messages:
 
 ## Build and verification
 
-Initialize submodules before configuring. DSDL C headers and C++ traits are generated into the build directory using the CMake module and templates supplied by libcxxcanard. Neither the Arduino `src/` tree nor an `App/cyphal.h` shim is used.
+Use `Release` configuration - other won't work due to timing or size issues. Initialize submodules before configuring. DSDL C headers and C++ traits are generated into the build directory using the CMake module and templates supplied by libcxxcanard. Neither the Arduino `src/` tree nor an `App/cyphal.h` shim is used.
 
-`VBDrive_full.hex` combines VBBoot at `0x08000000` with VBDrive at `0x08003000`. Both Release and RelWithDebInfo fit the flash partitions; Debug is not supported on this layout.
-
-Use Release for motor testing. The 2026-09-09 Servo smoke passed Serial/Cyphal
-and bounded PI/PID movement, but sampled FOC peaks still exceeded the 25 us
-budget (Release: 36.21 us; RelWithDebInfo: 39.56 us). Neither build has a verified
-40 kHz worst-case deadline; see `tests/README.md` for the measurement scope.
-Configure with `-DVBDRIVE_FOC_PROFILE=ON` to expose `last_cycle_cost` and
-`max_cycle_cost` in Release without enabling MONITOR (sample period: 256 calls).
-
-After a Release build, run `python3 tests/parameter_interfaces.py` for host regressions against the actual parameter implementation, Serial state controller and Cyphal callback (hardware/transport doubles).
-
-The bootloader-compatible configuration prefix uses type `0x44AAABFF`. Only fresh
+`VBDrive_full.hex` combines VBBoot at `0x08000000` with VBDrive at `0x08003000`. The bootloader-compatible configuration prefix uses type `0x44AAABFF`. Only fresh
 EEPROM provisioning is supported; existing configuration/calibration layouts are not migrated.
