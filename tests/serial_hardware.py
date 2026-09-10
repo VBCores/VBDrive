@@ -25,20 +25,17 @@ args = parser.parse_args()
 schema = re.findall(r'\{ParameterId::\w+,\s*"([^"]+)",\s*ParameterType::(\w+),\s*(true|false),\s*(true|false)',
                     (Path(__file__).resolve().parents[1] / 'App/parameters.hpp').read_text())
 assert len(schema) == 40
-schema = [entry for entry in schema if entry[0] not in ('bootloader', 'cmd_errors')]
-assert len(schema) == 38
 fd = os.open(args.port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
 tty.setraw(fd)
 attrs = termios.tcgetattr(fd)
 attrs[2] |= termios.CLOCAL | termios.CREAD
 attrs[2] &= ~termios.HUPCL
-attrs[4] = attrs[5] = termios.B19200
+attrs[4] = attrs[5] = termios.B115200
 termios.tcsetattr(fd, termios.TCSANOW, attrs)
 fcntl.ioctl(fd, termios.TIOCMBIS, struct.pack('I', termios.TIOCM_DTR | termios.TIOCM_RTS))
 transcript = []
 passed = False
 in_config = False
-in_test = False
 
 def command(text, duration=.25):
     termios.tcflush(fd, termios.TCIFLUSH)
@@ -110,20 +107,28 @@ try:
     for name, _, _, persistent in schema:
         if persistent == 'true': assert same(read(name), original[name])
 
-    assert 'Entering TEST' in command('TEST'); in_test = True
-    assert read('firmware_rev') == args.revision
+    for old in ('TEST', 'do_free', 'BOOT', 'do_vel:1', 'do_ang:1'):
+        assert 'Unknown' in command(old)
+    assert 'OK' in command('bootloader:0')
+    assert read('bootloader') == '0'
     command('log_on', .4)
-    assert 'rotor:' in command('firmware_rev:?', .4)
+    reply = command('firmware_rev:?', .4)
+    assert re.search(r'state: -?\d+\.\d{6} -?\d+\.\d{6} -?\d+\.\d{6}', reply), reply
     command('log_off')
-    assert 'No effort' in command('do_free')
-    assert 'Stopping TEST' in command('STOP'); in_test = False
-    for name in ('bootloader', 'cmd_errors'):
-        assert 'Unknown parameter' in command(name+':?')
+    assert 'OK: STOP' in command('STOP')
+    assert read('is_on') == '1'  # STOP is zero voltage, not disable.
+    command('log_on'); command('CONFIG'); in_config = True
+    assert 'RUNNING mode required' in command('log_on')
+    assert 'OK: STOP' in command('STOP')
+    command('EXIT'); in_config = False
+    assert 'state:' not in command('firmware_rev:?', .4)
+    assert 'OK' in command('is_on:0')
+    assert read('is_on') == '0'
     passed = True
 finally:
     if in_config: command('EXIT')
-    if in_test: command('STOP')
+    command('log_off'); command('STOP'); command('is_on:0')
     os.close(fd)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps({'passed': passed, 'transcript': transcript}, indent=2)+'\n')
-print('PASS: live Serial catalog, readonly, CONFIG/EXIT/RESET/SAVE/APPLY, TEST/logging/free/STOP')
+print('PASS: live Serial catalog, readonly, CONFIG/EXIT/RESET/SAVE/APPLY, shared runtime registers, logging/STOP')

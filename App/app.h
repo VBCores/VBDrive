@@ -67,3 +67,9 @@ inline T value_or_default(T value, T default_value, T not_set_value) {
 
 //command_mode.cpp
 void start_uart_recv_it();
+void process_serial();
+extern volatile bool serial_deferred;
+void reboot_to_bootloader_if_requested();
+void serial_tick();
+extern "C" void serial_service();
+void discard_serial_input();

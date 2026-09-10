@@ -85,7 +85,8 @@ __attribute__((hot)) void main_callback() {
     last_call = now;
     #endif
 
-    if (app_manager.is_app_running()) {
+    // Give deferred Serial I2C/EEPROM/actions thread time without changing the regulator.
+    if (app_manager.is_app_running() && !serial_deferred) {
         if (auto motor = get_motor()) {
             motor->update();
         }
@@ -142,6 +143,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
     if (htim->Instance == TIM7) {
         // <'++'/'+='/... expression of 'volatile'-qualified type is deprecated> - C++20
         millis_k = millis_k + 1;
+        serial_tick();
     } else if (htim->Instance == TIM2) {
         HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
     } else if (htim->Instance == TIM4) {

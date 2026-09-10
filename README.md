@@ -4,7 +4,10 @@
 >
 > [Buy here]()
 
-## Configuration Parameters (Serial and Cyphal)
+## Configuration and Control Registers (Serial and Cyphal)
+
+All 40 registers are shared. The following configuration registers are read/write
+and persistent; runtime controls `is_on` and `bootloader` are marked separately.
 
 | Parameter  | Description                                               | Type    | Example Values |
 | ---------- | --------------------------------------------------------- | ------- | -------------- |
@@ -29,6 +32,11 @@
 | `node_id`  | Cyphal/CAN node ID                                        | Integer | `1`, `42`      |
 | `data_baud`   | FDCAN data baud rate enum (see below) | Enum    | `0`, `1`, `2`  |
 | `nominal_baud`   | FDCAN nominal baud rate enum (see below) | Enum | `3`, `4`       |
+
+| Runtime control | Type | Access | Persistent | Meaning |
+| --- | --- | --- | --- | --- |
+| `is_on` | bit | read/write | no | Enable driver; Serial accepts 0/1 in RUNNING |
+| `bootloader` | bit | read/write | no | 1 requests VBBoot; 0 is a no-op, not cancellation |
 
 ### Servo Parameters
 
@@ -86,6 +94,27 @@ flashing MCU firmware alone does not erase external EEPROM.
 
 ---
 
+## Readonly Information Registers (Serial and Cyphal)
+
+All entries are non-persistent and readable without CONFIG. Writes are rejected.
+
+| Name | Type | Meaning |
+| --- | --- | --- |
+| `cmd_errors` | natural32 | Rejected Serial/Cyphal movement commands |
+| `vbdrive_model` | string | CMake constant M4310 |
+| `firmware_rev` | string | 16 hexadecimal digits of the VBDrive HEAD commit |
+| `bus_voltage` | real32 | Bus voltage, V |
+| `bus_current` | real32 | Working-current measurement, A; not a separate DC-link sensor |
+| `temp_mcu` | real32 | MCU temperature, K |
+| `temp_stator` | real32 | Stator temperature, K |
+| `is_fault` | bit | Currently false; DRV_FAULT remains deferred |
+| `encoder_shaft` | natural32 | Raw external encoder counts |
+| `encoder_rotor` | natural32 | Raw internal encoder counts |
+
+Before motor initialization, unavailable measurements return a Serial error or an
+empty Cyphal value. `firmware_rev` also supplies GetInfo's VCS revision; it identifies
+the commit, not uncommitted changes.
+
 ### **FDCAN Baud Rate Configuration**
 
 | parameter           | Value Name | Speed    | Numeric Value |
@@ -107,11 +136,11 @@ flashing MCU firmware alone does not erase external EEPROM.
 
 ## UART Configuration / Test Interface
 
-The board uses a UART-based serial interface for configuration, calibration, test control, and debug logging.
+The board uses a UART-based serial interface for configuration, calibration, motor commands, and state logging.
 
 ### **Connection Details**
 
-* **Baud Rate**: 19200
+* **Baud Rate**: 115200 (application and VBBoot)
 * **Format**: ASCII commands; trailing `\r`, `\n`, spaces and tabs are stripped automatically
 
 ---
@@ -120,7 +149,7 @@ The board uses a UART-based serial interface for configuration, calibration, tes
 
 * **Read parameter**:
   `<parameter_name>:?`
-  Example: `node_id:?` -> `node_id:11`. Queries work in every mode, without `CONFIG`.
+  Example: `node_id:?` -> `node_id:11`. Queries work without `CONFIG`, except during calibration.
 
 * **Write parameter**:
   `<parameter_name>:<value>`
@@ -128,79 +157,68 @@ The board uses a UART-based serial interface for configuration, calibration, tes
 
 ---
 
-### **Mode and Command Overview**
+### Commands
 
-| Command | Available State | Description |
-| ------- | --------------- | ----------- |
-| `CONFIG` | Any non-TEST state | Enter configuration mode and stop motor |
-| `EXIT` | CONFIG | Discard staged changes without writing EEPROM; restore the previous mode |
-| `SAVE` | CONFIG | Persist updated config to EEPROM (if changed), exit config mode, start motor |
-| `RESET` | CONFIG | Load default config values in RAM (does NOT affect current session - requires `SAVE` or `APPLY` to persist) |
-| `APPLY` | Any non-TEST state | Persist updated config (if changed) and reboot |
-| `BOOT` | Any state | Write bootloader request magic and reboot into VBBoot |
-| `CALIBRATE` | RUNNING, NOT_CALIBRATED | Run calibration action |
-| `TEST` | RUNNING | Enter test mode |
-| `STOP` | TEST | Exit test mode, clear FOC target, stop test logging |
+Every command requires CR, LF or CRLF. A UART idle event is not a command terminator.
+The maximum line is 191 bytes excluding its terminator. Commands may span UART
+packets; several lines may arrive together. Invalid/overflowed lines are discarded
+through a delimiter and produce an error, never a partial motion command.
 
----
+| Command | State | Meaning |
+| --- | --- | --- |
+| `CONFIG` | Except CALIBRATING | Stop motor and stage configuration |
+| `INFO` | Except CALIBRATING | Repeat startup information with current (staged in CONFIG) settings |
+| `HELP` | Except CALIBRATING | List Serial commands and syntax |
+| `EXIT` | CONFIG | Discard staged changes, including RESET, and restore previous state |
+| `SAVE` | CONFIG | Persist changes, apply Servo gains, exit CONFIG |
+| `RESET` | CONFIG | Stage fresh defaults; EXIT discards them |
+| `APPLY` | Except CALIBRATING | Save pending changes and reboot |
+| `CALIBRATE` | RUNNING, NOT_CALIBRATED | Run isolated blocking calibration |
+| `STOP` | Except CALIBRATING | Set voltage target to 0 |
+| `mit_cmd: <pos> <vel> <torq> <p_gain> <v_gain>` | RUNNING | Apply the same MIT command as Cyphal |
+| `servo_cmd: <type> <value>` | RUNNING | 0 velocity, 1 torque, 2 position, 3 voltage |
+| `log_on` | RUNNING | Enable state log at 10 ms intervals (100 Hz) |
+| `log_off` | Any | Disable state log |
 
-### **TEST Mode Commands**
+MIT arguments and Servo values are finite numbers separated by spaces/tabs.
+Exactly the specified argument count is required. Invalid movement leaves the
+previous target unchanged and increments `cmd_errors` once.
+Movement commands do not enable a disabled driver. STOP outside calibration
+does not change driver enable, CONFIG contents or logging. Use `is_on:0` to disable.
 
-| Command | Description |
-| ------- | ----------- |
-| `do_vel:<value>` | Set velocity target for FOC test controller |
-| `do_ang:<value>` | Set angle target for FOC test controller |
-| `do_free` | Zero target (no effort mode) |
-| `min_ang:<value or ?>` | Read/write lower position limit during test |
-| `max_ang:<value or ?>` | Read/write upper position limit during test |
-| `ang_off:<value or ?>` | Read/write angle offset during test |
-| `log_on` | Start UART test logging |
-| `log_off` | Stop UART test logging |
-| `STOP` | Exit test mode |
+TEST, do_vel, do_ang, do_free and BOOT are removed. Use `bootloader:1` instead of
+BOOT; it schedules a reboot without saving staged settings. `bootloader:0` does
+not cancel an accepted request. The bool register is identical in Cyphal.
+Calibration is an isolated blocking procedure: no commands, including STOP,
+queries or bootloader requests, are processed until it finishes. Serial input
+received during calibration is discarded, not executed afterwards. Wait for
+completion before sending another command. Calibration cannot be cancelled.
 
-When logging is enabled in TEST mode, UART periodically prints:
+Logging is disabled when leaving RUNNING and does not restart automatically.
+Its format uses the position, velocity and torque fields of `voltbro.foc.State`,
+in rad, rad/s and N m, without timestamp:
 
 ```text
-rotor: <u16> shaft :<u16> angle: <float> velocity: <float>
+state: 0.000000 0.000000 0.000000
 ```
 
----
+Replies include `OK: mit_cmd`, `OK: servo_cmd`, `OK: STOP`, and
+`OK: <register>:<value>`; errors begin with `ERROR:`.
+All Serial exchanges use the same shared register catalog.
 
-### **Response Format**
-
-* **Success**: `OK: <param>:<value>` (set operations)
-* **Error**: `ERROR: Unknown command`, `ERROR: Unknown parameter`, `ERROR: Invalid value`
-* **Config persistence**: UART configuration settings are written to EEPROM on `SAVE`/`APPLY` (not on every `SET`)
-* **Bootloader entry**: `BOOT` writes only the bootloader request magic. VBBoot reads `node_id`, `nominal_baud`, and `data_baud` from the EEPROM config prefix.
-
----
-
-### **Example Sessions**
-
-```bash
-# Configuration flow
-> CONFIG
-CONFIG MODE ENABLED
-> node_id:11
-OK: node_id:11
-> gear:36
-OK: gear:36
-> SAVE
-Saved config
-NOTE: config changes not applied! To apply, run APPLY or reset controller
-> APPLY
-```
-
-```bash
-# Test flow
-> TEST
-Entering TEST mode
-> do_vel:5
-Set velocity: <5.000000>
-> log_on
-# periodic sensor logs...
-> STOP
-Stopping TEST mode
+```text
+CONFIG
+servo_pos_p_gain:150
+servo_pos_i_gain:200
+servo_pos_d_gain:10
+SAVE
+is_on:1
+log_on
+servo_cmd: 0 0.05
+STOP
+log_off
+is_on:0
+cmd_errors:?
 ```
 
 ## FDCAN Cyphal Runtime Interface
@@ -242,32 +260,10 @@ with new firmware; new clients with old firmware are not supported.
 
 ---
 
-### **Registers**
-
-All configuration parameters are shared between Cyphal and Serial interfaces, except `bootloader` and `cmd_errors`, which are Cyphal-only. All config params listed at the top of README are mutable and persistent. Integer parameters use `natural32`, except `ang_dir` (`integer32`); floating-point parameters use `real32`.
-
-The remaining runtime registers are non-persistent and Cyphal-exclusive:
-
-| Name | Cyphal type | Access | Meaning |
-| --- | --- | --- | --- |
-| `is_on` | bit | read/write | Driver enable; Serial writes 0/1 in RUNNING |
-| `bootloader` | bit | read/write | Writing `true` reboots drive into VBBoot bootloader |
-| `cmd_errors` | natural32 | read-only | Cyphal-only; number of rejected Cyphal movement commands |
-| `vbdrive_model` | string | read-only | CMake constant `M4310` |
-| `firmware_rev` | string | read-only | 16 hexadecimal digits of the VBDrive HEAD commit |
-| `bus_voltage` | real32 | read-only | Bus voltage, V |
-| `bus_current` | real32 | read-only | Existing working-current measurement, A; not a separate DC-link current sensor |
-| `temp_mcu` | real32 | read-only | MCU temperature, K |
-| `temp_stator` | real32 | read-only | Stator temperature, K |
-| `is_fault` | bit | read-only | Currently false; DRV_FAULT integration is deferred |
-| `encoder_shaft` | natural32 | read-only | Raw external encoder counts |
-| `encoder_rotor` | natural32 | read-only | Raw internal encoder counts |
-
-Readonly writes do not change values. Unavailable motor measurements return an empty Cyphal value / a Serial error before motor initialization. `firmware_rev` also supplies GetInfo's numeric `software_vcs_revision_id`; it identifies the commit, not uncommitted changes.
-
-Serial config writes are staged until `SAVE`/`APPLY`. Repeated `CONFIG` does not replace the rollback snapshot; `EXIT` also rolls back `RESET`. TEST retains live `min_ang`, `max_ang`, `ang_off` updates. Reads work in every mode.
-
-Persistent register writes are queued and saved to EEPROM from the main loop. The config starts at EEPROM offset `0`, so VBBoot can read the shared C-compatible prefix containing `node_id`, `nominal_baud`, and `data_baud`. If the app does not have a complete EEPROM config yet, it starts Cyphal in maintenance mode with a deterministic setup node ID derived from the MCU UID.
+All registers are listed in the shared configuration/control and readonly tables
+above. Cyphal persistent writes use the existing deferred EEPROM-save path.
+An unconfigured device starts Cyphal in maintenance mode with a deterministic
+setup node ID derived from the MCU UID.
 
 ### **Angle Frame Semantics**
 

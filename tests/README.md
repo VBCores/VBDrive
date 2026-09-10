@@ -16,19 +16,24 @@ for every MTU. No hardware or motion is involved.
 Run `python3 tests/parameter_interfaces.py` after generating the Release DSDL headers.
 The test compiles the actual parameter implementation, Serial controller and Cyphal
 register callback with host hardware/transport doubles. It checks all 40 reads and
-types (38 shared parameters plus Cyphal-only `bootloader` and `cmd_errors`),
-rejection of both Cyphal-only names in every Serial mode, every persistent
+types (all 40 registers shared, including `bootloader` and `cmd_errors`),
+global readonly queries, every persistent
 parameter's Serial write/EXIT rollback and Cyphal write,
 readonly write rejection, CONFIG snapshots, RESET rollback, SAVE after an invalid
-write, TEST commands/live angle limits, numeric validation, delayed EEPROM writes,
-configuration before motor creation and both boot commands. The EEPROM config size
+write, MIT/Servo commands, numeric validation, delayed EEPROM writes,
+configuration before motor creation and the shared bootloader register. The EEPROM config size
 and placements are checked (102 bytes; config 0, calibration 103).
 Unified config writes/readback and preservation of bytes outside the config
 are tested with a byte-addressed EEPROM double. Servo registers
 are included in the write/rollback tests, with negative/non-finite gain rejection
 and transient-form validation. The communication test also checks all four Servo
 setpoint modes, invalid modes and wire equality with legacy specific_control.
+It also exercises the actual FIFO/line consumer with split commands, multiple lines,
+CR/LF/CRLF and overflow recovery, logging state rules and global STOP.
 It does not simulate the FOC loop, physical encoders, UART DMA or CAN transport.
+
+Calibration keeps the original blocking implementation. The interface test checks
+that its Serial input is discarded rather than queued for subsequent execution.
 
 ## Servo regulators
 
@@ -42,6 +47,134 @@ CONFIG values from Cyphal runtime writes and deferred persistence.
 
 These host checks are not physical motor validation or FOC timing measurements.
 The 2026-09-08 results below predate Servo PID/PI implementation.
+
+## Shared Serial/Cyphal smoke, 2026-09-10
+
+### Serial service fix — verified on hardware
+
+The working implementation services Serial from PendSV once per millisecond,
+at most one command per invocation, using DMA TX without waiting in the handler.
+Busy TX prevents consumption of the next command or overwriting its response.
+State logging uses the same service and TX buffer. Calibration, EEPROM writes,
+driver I2C operations and reset remain in thread mode. A deferred operation
+temporarily suppresses normal motor updates so thread mode can complete it;
+the FOC algorithm, target laws and timer period are unchanged.
+
+Host tests cover bounded dispatch, TX backpressure, deferred SAVE/APPLY,
+calibration dispatch and driver enable. CubeMX-generated USART2 and PendSV
+priorities are both 1. Release was flashed and verified: 109868 bytes Flash,
+29392 bytes RAM. The full live register/CONFIG/EXIT/RESET/SAVE/APPLY test passed.
+
+`serial_stress.py` exercises every Servo mode and MIT while requesting parameters
+and receiving the state log. With the original 10 Hz log, at 20 requests/s, 420 queries passed with maximum
+response 8.61 ms and maximum state-log gap 103.01 ms. At 100 requests/s, 2100
+queries passed with maximum response 12.63 ms and maximum log gap 104.07 ms.
+STOP and driver-disable acknowledgements passed; each run left the drive off.
+No UART resets or debugger intervention were used during these stress runs.
+
+The state log was then raised to 100 Hz (10 ms grid, without queuing stale samples).
+The updated Release uses 109892 bytes Flash and 29392 bytes RAM and was flashed
+and verified. With every Servo mode and MIT exercised at 115200 baud, all 2100
+parameter queries at 100 requests/s passed alongside 2108 state samples:
+measured state rate 100.03 Hz, maximum host-observed state gap 28.25 ms,
+maximum response latency 17.17 ms. STOP, log_off and is_on:0 passed; readback
+confirmed the drive off. Host parameter, MIT compatibility and Servo tests passed.
+Report: `build/servo-validation/serial-service-state100hz-stress.json`.
+
+Startup-log follow-up: VBBoot now waits for USART TC after `JAPP`, preserving
+the final CRLF across the application jump. Config loading sends each formatted
+fragment synchronously in thread mode through the existing 512-byte buffer;
+runtime responses and state logging retain DMA. Host tests cover a multi-buffer
+dump and its final Servo fields. The flashed Release uses 110156 bytes Flash
+and 29392 bytes RAM; VBBoot uses 9360 bytes Flash. A raw reset capture confirms
+`JAPP\r\nGot config_data`, `servo_tr_vel` and the final startup message:
+`build/servo-validation/startup-log-fixed.bin`.
+The live register/CONFIG/EXIT/RESET/SAVE/APPLY/logging/STOP regression passed;
+APPLY also produced the complete startup dump. The drive was left off.
+Report: `build/servo-validation/serial-startup-fix-registers.json`.
+
+INFO/HELP follow-up (host- and hardware-tested): startup information now ends
+with `See HELP for available commands`. INFO reuses that formatter without
+reloading EEPROM or changing state; in CONFIG it displays staged settings.
+HELP lists commands, parameter syntax and calibration restrictions. Both long
+responses run through the deferred thread-mode Serial path. Host tests check
+RUNNING/CONFIG dispatch, complete output beyond 512 bytes, all command names,
+the final hint, and unchanged driver/state/EEPROM writes. Release builds with
+111844 bytes Flash and 29392 bytes RAM. The image was flashed and verified after
+explicit approval. Serial checks confirmed byte-for-byte equality between INFO
+and the application startup message, the final hint, complete HELP, both commands
+in CONFIG, and unchanged INFO after EXIT discarded staged gear changes. STOP and
+driver-off readback passed. Captures: `build/servo-validation/startup-info-help.bin`
+and `build/servo-validation/info-help.txt`.
+
+Run on an explicitly authorized drive:
+
+```sh
+python3 tests/serial_stress.py --port /dev/cu.usbmodem1203 --motion --rate 100 --output build/servo-validation/serial-service-state100hz-stress.json
+```
+
+Reports are `build/servo-validation/serial-service-registers.json`,
+`serial-service-stress-all-modes.json` and `serial-service-stress-100hz.json`.
+An initial reuse of the older `unified_motion.py` stopped on its instantaneous
+velocity-average assertion despite continuous replies and positive displacement;
+that report remains `serial-service-motion.json` (failed). The new stress test
+validates Serial delivery/latency, not mechanical tracking precision or FOC WCET.
+Physical recalibration was not repeated; isolated calibration input and deferred
+dispatch are covered by host tests.
+
+### UART 115200 follow-up
+
+USART2 was regenerated with STM32CubeMX at 115200 baud; only the baud setting
+was retained from generation. VBBoot's hand-written UART initialization was
+synchronized. Release application and bootloader were flashed together; EEPROM
+was not erased. Host tests and the full live Serial parameter test passed.
+
+The MIT -> STOP -> Servo motion test still lost timely replies. Read-only debugger
+snapshots localized two delays in Serial servicing, not UART framing or overrun:
+
+- At USART2 IRQ priority 3, IDLE was set and IRQ 38 remained pending. RX DMA had
+  received 24 bytes; HAL reported ErrorCode=0. One snapshot also showed hardware
+  TX complete while HAL gState was still BUSY_TX, awaiting the UART TC handler.
+- Temporarily raising only USART2 priority to 1 in NVIC cleared its pending bit
+  and rearmed RX DMA. However, the foreground Serial FIFO still held 77 bytes
+  (head=106, tail=29), and commands were not promptly dispatched.
+- Across the zero-Servo snapshots, the priority-0 millisecond timer advanced by
+  141453 ms while the priority-15 SysTick advanced by only 17 ms. TIM4 was both
+  active and pending. Debugger stops perturb scheduling, but cannot account for
+  this large difference. An isolated FOC maximum above 4000 cycles is not used
+  as proof of the cause; the IRQ/FIFO/timer observations are the relevant evidence.
+
+The temporary priority change was removed by reset. No FOC or permanent interrupt
+priority changes were made. Increasing baud alone does not resolve delayed Serial
+service. Reports: `build/servo-validation/serial-115200-registers.json`,
+`serial-115200-motion.json`, `serial-115200-diag-1.txt` through `-4.txt`, and
+`serial-115200-irq1.json`.
+
+### Initial 19200-baud smoke
+
+Release was flashed and verified on ST-Link `0672FF544983555067215514`:
+109420 bytes Flash, 29376 bytes RAM. Host parameter, Servo numerical and MIT/legacy
+wire tests pass. Calibration uses its unchanged blocking algorithm, without input
+handling or cancellation; host tests cover discarding queued and partial Serial
+commands at the calibration boundary. No physical recalibration was performed.
+
+The full live Serial test passed all 40 registers, readonly rejection, persistent
+Servo settings, CONFIG/EXIT/RESET/SAVE/APPLY, removed commands, logging and STOP.
+Fragmented/batched input and overlong-line recovery passed on hardware. All four
+Servo modes acknowledged commands without enabling the disabled motor. Serial
+`bootloader:1` entered VBBoot; an addressed reset returned to the application.
+Cyphal reads confirmed the same revision and five persistent Servo gains.
+
+MIT movement and STOP worked. The combined motion test then lost Serial responses
+before its Servo step; an ST-Link snapshot found execution inside the FOC timer
+interrupt. After reset, a separate Servo velocity command produced movement and
+STOP/log_off/is_on:0 succeeded, but telemetry/command responses were delayed.
+This is not a passing real-time or sustained-motion qualification. The existing
+FOC timing issue was not changed or diagnosed conclusively in this task.
+
+Reports: `build/servo-validation/unified-serial.json` (pass),
+`unified-motion.json` (failed combined run), `unified-servo.json`,
+`unified-servo-motion.json` and `unified-final.json`. Motor left disabled.
 
 ## Servo hardware smoke, 2026-09-09
 

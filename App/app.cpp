@@ -233,7 +233,8 @@ bool do_calibrate() {
     // Stop all control
     motor->set_foc_point(FOCTarget{0});
     auto& app_manager = get_app_manager();
-    app_manager.set_state(CommandState::NOT_CALIBRATED);
+    app_manager.set_state(CommandState::CALIBRATING);
+    discard_serial_input();
 
     calibration_data.reset();
     // NOTE: see app.h lines 20-21 for details on cyphal_queue_buffer_shared
@@ -253,7 +254,7 @@ void apply_calibration() {
     if (calibration_data.type_id != CalibrationData::TYPE_ID || !calibration_data.was_calibrated) {
         auto& app_manager = get_app_manager();
         char warning_message[] = "Motor is not calibrated! Movement forbidden\n\r\0";
-        app_manager.send_message_blocking(warning_message);
+        app_manager.send_message(warning_message);
         app_manager.set_state(CommandState::NOT_CALIBRATED);
         return;
     }
@@ -261,7 +262,6 @@ void apply_calibration() {
 }
 
 static void persist_pending_config_if_needed();
-static void reboot_to_bootloader_if_requested();
 
 void app() {
 #ifdef STACK_PROFILE
@@ -287,6 +287,7 @@ void app() {
         start_cyphal();
         set_cyphal_mode(uavcan_node_Mode_1_0_MAINTENANCE);
         while (true) {
+            process_serial();
             cyphal_loop();
             persist_pending_config_if_needed();
             reboot_to_bootloader_if_requested();
@@ -319,9 +320,9 @@ void app() {
     #ifdef STACK_PROFILE
     static millis stack_measurement_time = 0;
     #endif
-    static millis logging_time = 0;
 
     while(true) {
+        process_serial();
         if (app_manager.is_app_running()) {
             cyphal_loop();
             persist_pending_config_if_needed();
@@ -336,17 +337,6 @@ void app() {
         })
         #endif
 
-        EACH_N(current_time, logging_time, 100, {
-            if (app_manager.is_logging()) {
-                app_manager.send_message_blocking(
-                    "rotor: %6u shaft :%6u angle: %6.2f velocity: %6.2f\r\n",
-                    motor->get_rotor_encoder_value(),
-                    motor->get_shaft_encoder_value(),
-                    motor->get_angle(),
-                    motor->get_velocity()
-                );
-            }
-        })
     }
 }
 
@@ -369,7 +359,7 @@ static void persist_pending_config_if_needed() {
     HAL_IMPORTANT(get_eeprom().write<VBDriveConfig>(&config, CONFIG_PLACEMENT))
 }
 
-static void reboot_to_bootloader_if_requested() {
+void reboot_to_bootloader_if_requested() {
     if (!bootloader_reboot_pending) {
         return;
     }
@@ -400,11 +390,28 @@ void in_loop_reporting(millis current_t) {
     })
 }
 
+bool apply_mit_command(FOCTarget target) {
+    auto motor = get_motor();
+    return motor && motor->set_foc_point(std::move(target));
+}
+
+bool apply_servo_command(uint8_t type, float value) {
+    auto motor = get_motor();
+    if (!motor) return false;
+    switch (type) {
+        case voltbro_foc_Servo_1_0_VELOCITY: return motor->set_velocity_point(value);
+        case voltbro_foc_Servo_1_0_TORQUE: return motor->set_torque_point(value);
+        case voltbro_foc_Servo_1_0_POSITION: return motor->set_angle_point(value);
+        case voltbro_foc_Servo_1_0_VOLTAGE: return motor->set_voltage_point(value);
+        default: return false;
+    }
+}
+
 class FOCCommandSub: public AbstractSubscription<voltbro_foc_MITCommand_1_0> {
 public:
     FOCCommandSub(InterfacePtr interface, CanardPortID port_id): AbstractSubscription<voltbro_foc_MITCommand_1_0>(interface, port_id) {};
     void handler(const voltbro_foc_MITCommand_1_0& msg, CanardRxTransfer*) override {
-        bool is_valid = motor->set_foc_point(FOCTarget {
+        bool is_valid = apply_mit_command(FOCTarget {
             .torque = msg._torq.newton_meter,
             .angle = msg.pos.radian,
             .velocity = msg.vel.radian_per_second,
@@ -425,23 +432,7 @@ public:
     // NOTE: transfer parameter required by the interface, but not used in this implementation
     void handler(const voltbro_foc_Servo_1_0& msg, CanardRxTransfer* _) override {
     #pragma GCC diagnostic pop
-        bool is_valid = false;
-        switch (msg.set_point_type){
-            case voltbro_foc_Servo_1_0_VELOCITY:
-                is_valid = motor->set_velocity_point(msg.set_point_value);
-                break;
-            case voltbro_foc_Servo_1_0_TORQUE:
-                is_valid = motor->set_torque_point(msg.set_point_value);
-                break;
-            case voltbro_foc_Servo_1_0_POSITION:
-                is_valid = motor->set_angle_point(msg.set_point_value);
-                break;
-            case voltbro_foc_Servo_1_0_VOLTAGE:
-                is_valid = motor->set_voltage_point(msg.set_point_value);
-                break;
-            default:
-                break;
-        }
+        const bool is_valid = apply_servo_command(msg.set_point_type, msg.set_point_value);
         if (!is_valid) {
             record_invalid_command();
         }

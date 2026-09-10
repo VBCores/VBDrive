@@ -7,6 +7,8 @@
 #include "parameters.hpp"
 
 VBDrive* get_motor();
+bool apply_mit_command(FOCTarget target);
+bool apply_servo_command(uint8_t type, float value);
 void reboot_to_bootloader();
 bool parse_serial_number(std::string_view input, int& value);
 bool parse_serial_number(std::string_view input, float& value);
@@ -90,17 +92,12 @@ constexpr size_t IND_SENSOR_STATE_PLACEMENT = CALIBRATION_PLACEMENT + sizeof(Cal
 struct CommandState: AppState {
     static constexpr AppStateT NOT_CALIBRATED{4};
     static constexpr AppStateT CALIBRATING{5};
-    static constexpr AppStateT TESTING{6};
 };
 
 class DriveStateController: public AppConfigurator<CommandState, VBDriveConfig, CONFIG_PLACEMENT, std::string_view> {
 protected:
-    static constexpr std::string_view TEST_COMMAND = "TEST";
     static constexpr std::string_view CALIBRATE_COMMAND = "CALIBRATE";
     static constexpr std::string_view STOP_COMMAND = "STOP";
-    static constexpr std::string_view VEL_PARAM = "do_vel";
-    static constexpr std::string_view ANGLE_PARAM = "do_ang";
-    static constexpr std::string_view FREE_COMMAND = "do_free";
     static constexpr std::string_view START_LOGGING_COMMAND = "log_on";
     static constexpr std::string_view STOP_LOGGING_COMMAND = "log_off";
 
@@ -118,62 +115,128 @@ public:
         return app_state == CommandState::CONFIG ? config_before_config : config_data;
     }
 
-    bool is_logging() {
-        return BaseConfigurator::app_state == CommandState::TESTING && _is_logging;
+    void set_state(CommandState::ValueT state) {
+        if (state != CommandState::RUNNING) _is_logging = false;
+        BaseConfigurator::set_state(state);
     }
 
-    void send_message_blocking(const char* fmt, ...) {
-        size_t buffer_size = strlen(fmt) + 15;  // should be enough for param expansion
-        char buffer[buffer_size];
+    bool is_logging() const {
+        return app_state == CommandState::RUNNING && _is_logging;
+    }
+
+    void send_message(const char* fmt, ...) {
+        wait_for_uart();
+        auto& buffer = uart_tx_buffer;
+        constexpr size_t buffer_size = sizeof(uart_tx_buffer);
 
         va_list args;
         va_start(args, fmt);
         int written = npf_vsnprintf(buffer, buffer_size, fmt, args);
         va_end(args);
 
-        if (written == 0) {
+        if (written <= 0) {
             return;
         }
 
-        wait_for_uart();
-        HAL_UART_Transmit(huart, reinterpret_cast<uint8_t*>(buffer), written, 1000);
+        HAL_UART_Transmit_DMA(huart, reinterpret_cast<uint8_t*>(buffer), std::min(static_cast<size_t>(written), buffer_size - 1));
     }
 
     void set_calibration_finished() {
         BaseConfigurator::app_state = CommandState::RUNNING;
         char message[] = "Calibration finished\n\r\0";
-        send_message_blocking(message);
+        send_message(message);
     }
 
     bool is_calibration_allowed() const {
         return BaseConfigurator::app_state == CommandState::CALIBRATING;
     }
 
-    bool is_app_running() const override {
-        return BaseConfigurator::is_app_running() || BaseConfigurator::app_state == CommandState::TESTING;
-    }
-
     void process_command(std::string_view command, UARTResponseAccumulator& responses) override {
-        if (command == "BOOT") {
-            responses.append("Rebooting to bootloader\n\r");
-            wait_for_uart();
-            reboot_to_bootloader();
+        if (command == "INFO") {
+            print_info(responses);
+            return;
+        }
+        if (command == "HELP") {
+            responses.append("Commands are case-sensitive; terminate with CR or LF.\r\n");
+            responses.append("INFO - repeat startup information (current config)\r\nHELP - list commands\r\n");
+            responses.append("CONFIG - stop motor, stage config\r\nEXIT - discard staged changes\r\n");
+            responses.append("SAVE - save config and exit\r\nRESET - stage defaults (CONFIG)\r\nAPPLY - save pending config and reboot\r\n");
+            responses.append("CALIBRATE - isolated calibration; input discarded until done\r\nSTOP - set voltage target to zero\r\n");
+            responses.append("mit_cmd: <pos> <vel> <torq> <p_gain> <v_gain> (RUNNING)\r\n");
+            responses.append("servo_cmd: <type> <value> (RUNNING); 0 velocity, 1 torque, 2 position, 3 voltage\r\n");
+            responses.append("log_on - state at 100 Hz (RUNNING)\r\nlog_off - disable state log\r\n");
+            responses.append("<parameter>:? - read\r\n<parameter>:<value> - write config in CONFIG\r\n");
+            responses.append("is_on:0/1 - disable/enable driver\r\nbootloader:1 - reboot to loader without saving; 0 - no action\r\n");
+            responses.append("No commands are processed during calibration.\r\n");
+            return;
+        }
+        if (command == STOP_COMMAND) {
+            if (auto motor = get_motor()) motor->set_voltage_point(0.0f);
+            responses.append("OK: STOP\r\n");
+            return;
+        }
+        if (command == STOP_LOGGING_COMMAND) {
+            _is_logging = false;
+            responses.append("OK: log_off\r\n");
+            return;
+        }
+        if (command == START_LOGGING_COMMAND) {
+            if (app_state != CommandState::RUNNING) {
+                responses.append("ERROR: RUNNING mode required\r\n");
+                return;
+            }
+            _is_logging = true;
+            responses.append("OK: log_on\r\n");
             return;
         }
         auto values = BaseConfigurator::split_parameter(command);
         if (values) {
             auto [param, value] = *values;
+            if (param == "mit_cmd" || param == "servo_cmd") {
+                if (app_state != CommandState::RUNNING) {
+                    responses.append("ERROR: RUNNING mode required\r\n");
+                    return;
+                }
+                std::array<std::string_view, 5> args{};
+                size_t count = 0;
+                while (!value.empty() && count < args.size()) {
+                    const auto first = value.find_first_not_of(" \t");
+                    if (first == std::string_view::npos) { value = {}; break; }
+                    value.remove_prefix(first);
+                    const auto end = value.find_first_of(" \t");
+                    args[count++] = value.substr(0, end);
+                    value.remove_prefix(end == std::string_view::npos ? value.size() : end);
+                }
+                bool valid = value.find_first_not_of(" \t") == std::string_view::npos;
+                if (param == "mit_cmd") {
+                    std::array<float, 5> numbers{};
+                    valid &= count == 5;
+                    for (size_t i = 0; valid && i < numbers.size(); ++i) {
+                        valid = parse_serial_number(args[i], numbers[i]) && std::isfinite(numbers[i]);
+                    }
+                    if (valid) valid = apply_mit_command(FOCTarget{
+                        .torque = numbers[2], .angle = numbers[0], .velocity = numbers[1],
+                        .angle_kp = numbers[3], .velocity_kp = numbers[4]});
+                } else {
+                    int type = -1;
+                    float target = 0;
+                    valid = valid && count == 2 && parse_serial_number(args[0], type) &&
+                        type >= 0 && type <= 3 && parse_serial_number(args[1], target) && std::isfinite(target);
+                    if (valid) valid = apply_servo_command(static_cast<uint8_t>(type), target);
+                }
+                if (!valid) {
+                    record_invalid_command();
+                    responses.append("ERROR: Invalid target\r\n");
+                } else responses.append("OK: %s\r\n", param == "mit_cmd" ? "mit_cmd" : "servo_cmd");
+                return;
+            }
             if (value == "?") {
                 config_data.get(param, responses);
                 return;
             }
             const auto* definition = find_parameter(param);
-            if (definition && !definition->available_in_serial()) {
-                responses.append("ERROR: Unknown parameter\n\r");
-                return;
-            }
-            if (!definition && BaseConfigurator::app_state != CommandState::TESTING) {
-                responses.append("ERROR: Unknown parameter\n\r");
+            if (!definition) {
+                responses.append("ERROR: Unknown parameter\r\n");
                 return;
             }
             if (definition && !definition->is_mutable) {
@@ -206,22 +269,13 @@ public:
                 return;
             }
             if (definition && definition->is_persistent && BaseConfigurator::app_state != CommandState::CONFIG) {
-                if (app_state == CommandState::TESTING &&
-                    (param == "min_ang" || param == "max_ang" || param == "ang_off")) {
-                    do_save |= config_data.set(param, value, responses, true);
-                    return;
-                }
                 responses.append("ERROR: CONFIG mode required\n\r");
                 return;
             }
         }
-        if (BaseConfigurator::app_state == CommandState::RUNNING && command == TEST_COMMAND) {
-            BaseConfigurator::app_state = CommandState::TESTING;
-            responses.append("Entering TEST mode\n\r");
-            return;
-        }
-        if (BaseConfigurator::app_state == CommandState::TESTING) {
-            handle_testing_mode(command, responses);
+        if (!values && command != CONFIG_COMMAND && command != "EXIT" &&
+            command != SAVE_COMMAND && command != "APPLY" && command != "RESET") {
+            responses.append("ERROR: Unknown command\r\n");
             return;
         }
         if (command == CONFIG_COMMAND) {
@@ -229,6 +283,7 @@ public:
                 responses.append("CONFIG MODE ENABLED\n\r");
                 return;
             }
+            _is_logging = false;
             state_before_config = app_state;
             config_before_config = config_data;
         }
@@ -247,56 +302,4 @@ public:
         if (values && app_state == CommandState::CONFIG) do_save |= pending_save;
     }
 
-    void handle_testing_mode(std::string_view command, UARTResponseAccumulator& responses) {
-        auto motor = get_motor();
-
-        if (command == STOP_COMMAND) {
-            responses.append("Stopping TEST mode\n\r");
-            motor->set_foc_point(FOCTarget{0});
-            app_state = CommandState::RUNNING;
-            _is_logging = false;
-        }
-        else if (command == START_LOGGING_COMMAND) {
-            _is_logging = true;
-        }
-        else if (command == STOP_LOGGING_COMMAND) {
-            _is_logging = false;
-        }
-        else if (command == FREE_COMMAND) {
-            motor->set_foc_point(FOCTarget{0});
-            responses.append("No effort mode\r\n");
-        }
-        else {
-            auto values = split_parameter(command);
-            if (!values) {
-                responses.append("ERROR: Unknown command\n\r");
-                return;
-            }
-            auto [param, value] = *values;
-            if (param != VEL_PARAM && param != ANGLE_PARAM) {
-                responses.append("ERROR: Unknown command\n\r");
-                return;
-            }
-            float setpoint = 0;
-            bool is_converted = parse_serial_number(value, setpoint);
-            if (!is_converted || !std::isfinite(setpoint)) {
-                record_invalid_command();
-                responses.append("ERROR: Invalid target\n\r");
-                return;
-            }
-            const bool position = param == ANGLE_PARAM;
-            if (!motor->set_foc_point(FOCTarget{
-                .torque = 0,
-                .angle = position ? setpoint : 0,
-                .velocity = position ? 0 : setpoint,
-                .angle_kp = position ? 7.0f : 0,
-                .velocity_kp = 0.5f
-            })) {
-                record_invalid_command();
-                responses.append("ERROR: Invalid target\n\r");
-                return;
-            }
-            responses.append(position ? "Set angle: <%f>\n\r" : "Set velocity: <%f>\n\r", setpoint);
-        }
-    }
 };

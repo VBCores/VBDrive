@@ -9,7 +9,7 @@ import tempfile
 
 root = Path(__file__).resolve().parents[1]
 app = (root / 'App/app.cpp').read_text()
-handler = app[app.index('class FOCCommandSub:'):app.index('class ServoSub:')]
+handler = app[app.index('bool apply_mit_command('):app.index('class ServoSub:')]
 servo_handler = app[app.index('class ServoSub:'):app.index('// NOTE: underlying CanardRxSubscriptions')]
 source = r'''
 #include <cassert>
@@ -17,6 +17,7 @@ source = r'''
 #include <cstring>
 #include <cstdio>
 #include <initializer_list>
+#include <utility>
 #include <libcanard/canard.h>
 #include <voltbro/foc/command_1_0.h>
 #include <voltbro/foc/MITCommand_1_0.h>
@@ -45,6 +46,7 @@ struct Motor {
     void set_current_regulator_params(float p,float i) {kp=p; ki=i; ++gains;}
 } device;
 Motor* motor=&device;
+Motor* get_motor() {return motor;}
 int errors=0;
 void record_invalid_command() {++errors;}
 '''+handler+servo_handler+r'''
