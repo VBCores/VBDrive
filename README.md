@@ -254,7 +254,7 @@ with new firmware; new clients with old firmware are not supported.
 
 | Port ID Formula  | Message Type                       | Description                                                                 |
 | ---------------- | ---------------------------------- | --------------------------------------------------------------------------- |
-| `2107 + node_id` | `voltbro.foc.MITCommand.1.0` | Torque, position, velocity, position gain and velocity gain |
+| `2107 + node_id` | `voltbro.foc.MIT.1.0` | Torque, position, velocity, position gain and velocity gain |
 | `3407 + node_id` | `voltbro.foc.Servo.1.0` | VELOCITY=0, TORQUE=1, POSITION=2, VOLTAGE=3; uint8 type, float32 value |
 
 
@@ -272,7 +272,7 @@ setup node ID derived from the MCU UID.
 All joint-angle values exposed over Cyphal use the same corrected frame:
 
 * `reported_angle = measured_shaft_angle * ang_dir + ang_off`
-* `voltbro.foc.MITCommand.pos`, `voltbro.foc.Servo` position targets, `min_ang`, and `max_ang` are all interpreted in that corrected frame
+* `voltbro.foc.MIT.pos`, `voltbro.foc.Servo` position targets, `min_ang`, and `max_ang` are all interpreted in that corrected frame
 * Positive `ang_off` increases the reported and commanded joint angle for the same physical shaft position
 * Units are radians
 
