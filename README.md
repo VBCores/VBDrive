@@ -9,29 +9,42 @@
 All 40 registers are shared. The following configuration registers are read/write
 and persistent; runtime controls `is_on` and `bootloader` are marked separately.
 
-| Parameter  | Description                                               | Type    | Example Values |
-| ---------- | --------------------------------------------------------- | ------- | -------------- |
-| `gear`     | Gear ratio of the drive                                   | Integer | `1`, `5`, `15` |
-| `max_i`    | Maximum motor current (A)                                 | Float   | `5.0`, `10.5`  |
-| `max_spd`  | Maximum motor speed (rad)                                 | Float   | `1000.0`       |
-| `max_tq`   | Maximum torque output (Nm)                                | Float   | `1.2`          |
-| `ang_off`  | Joint angle offset (rad)                                  | Float   | `0.0`, `15.5`  |
-| `ang_dir`  | Joint angle direction multiplier, -1 or +1 | Integer | `1`, `-1` |
-| `min_ang`  | Minimum allowed angle (rad)                               | Float   | `-30.0`        |
-| `max_ang`  | Maximum allowed angle (rad)                               | Float   | `30.0`         |
-| `kt`       | Torque constant (Nm/A)                                    | Float   | `0.12`         |
-| `kp`       | Current proportional gain                                 | Float   | `0.25`         |
-| `ki`       | Current integral gain                                     | Float   | `0.01`         |
-| `kd`       | Current derivative gain                                   | Float   | `0.005`        |
-| `flt_a`    | Main filter parameter A                                   | Float   | `0.5`          |
-| `flt_g1`   | Filter gain 1                                             | Float   | `0.1`          |
-| `flt_g2`   | Filter gain 2                                             | Float   | `0.1`          |
-| `flt_g3`   | Filter gain 3                                             | Float   | `0.1`          |
-| `i_lpf`    | Current low-pass filter coefficient                       | Float   | `0.1`          |
-| `ang_enc`  | Angle encoder type enum, 0 rotor, 1 - shaft               | Integer | `0`, `1`.      |
-| `node_id`  | Cyphal/CAN node ID                                        | Integer | `1`, `42`      |
-| `data_baud`   | FDCAN data baud rate enum (see below) | Enum    | `0`, `1`, `2`  |
-| `nominal_baud`   | FDCAN nominal baud rate enum (see below) | Enum | `3`, `4`       |
+| Parameter | Description | Type | Default |
+| --- | --- | --- | --- |
+| `gear` | Gear ratio of the drive | Integer | `36` |
+| `max_i` | Maximum motor current (A) | Float | `NaN` |
+| `max_spd` | Maximum motor speed target (rad/s) | Float | `NaN` |
+| `max_tq` | Maximum torque output (Nm) | Float | `NaN` |
+| `ang_off` | Joint angle offset (rad) | Float | `0.0` |
+| `ang_dir` | Joint angle direction multiplier, -1 or +1 | Integer | `1` |
+| `min_ang` | Minimum allowed angle (rad) | Float | `NaN` |
+| `max_ang` | Maximum allowed angle (rad) | Float | `NaN` |
+| `kt` | Torque constant (Nm/A) | Float | `1.0` |
+| `kp` | Current proportional gain | Float | `4.0` |
+| `ki` | Current integral gain | Float | `1600.0` |
+| `kd` | Current derivative gain | Float | `0.0` |
+| `flt_a` | Main filter parameter A | Float | `0.0` |
+| `flt_g1` | Filter gain 1 | Float | `0.015700989410003974` |
+| `flt_g2` | Filter gain 2 | Float | `3.925227776360174` |
+| `flt_g3` | Filter gain 3 | Float | `387.54711795263574` |
+| `i_lpf` | Current low-pass filter coefficient | Float | `0.0925` |
+| `ang_enc` | Angle encoder type enum, 0 rotor, 1 shaft | Integer | `0` (rotor) |
+| `node_id` | Cyphal/CAN node ID | Integer | `0` (unset) |
+| `data_baud` | FDCAN data baud rate enum (see below) | Enum | `3` (8 MHz) |
+| `nominal_baud` | FDCAN nominal baud rate enum (see below) | Enum | `4` (1 MHz) |
+
+To clear a user-configured limit, write `NaN` to the corresponding register:
+`min_ang`, `max_ang`, `max_spd`, `max_i`, or `max_tq`. Each limit is
+independent. `NaN` removes the angle bound or commanded-speed bound; it does
+not permit a `NaN` movement target. For `max_i` and `max_tq`, `NaN` removes
+only the user limit: the hardware limits (30 A and 30 Nm) and stall derating
+still apply. `max_spd` checks velocity targets; it does not cap measured speed
+in POSITION mode. Over Serial, send a value such as `min_ang:nan` in
+`CONFIG`, then use `APPLY` to save and reboot. Cyphal writes to these limit
+registers apply at runtime and are saved.
+
+`node_id = 0` is an unset configuration value. An unconfigured device uses a
+temporary setup node ID derived from its MCU UID.
 
 | Runtime control | Type | Access | Persistent | Meaning |
 | --- | --- | --- | --- | --- |
@@ -107,7 +120,7 @@ All entries are non-persistent and readable without CONFIG. Writes are rejected.
 | `bus_current` | real32 | Working-current measurement, A; not a separate DC-link sensor |
 | `temp_mcu` | real32 | MCU temperature, K |
 | `temp_stator` | real32 | Stator temperature, K |
-| `is_fault` | bit | Currently false; DRV_FAULT remains deferred |
+| `is_fault` | bit | Reports false; DRV_FAULT integration remains deferred |
 | `encoder_shaft` | natural32 | Raw external encoder counts |
 | `encoder_rotor` | natural32 | Raw internal encoder counts |
 
@@ -167,7 +180,7 @@ through a delimiter and produce an error, never a partial motion command.
 | Command | State | Meaning |
 | --- | --- | --- |
 | `CONFIG` | Except CALIBRATING | Stop motor and stage configuration |
-| `INFO` | Except CALIBRATING | Repeat startup information with current (staged in CONFIG) settings |
+| `INFO` | Except CALIBRATING | Repeat startup information with configured settings (including staged values in CONFIG) |
 | `HELP` | Except CALIBRATING | List Serial commands and syntax |
 | `EXIT` | CONFIG | Discard staged changes, including RESET, and restore previous state |
 | `SAVE` | CONFIG | Persist changes, apply Servo gains, exit CONFIG |
@@ -281,7 +294,7 @@ This means limit enforcement and position control are applied after the offset i
 ### **Calibration Workflow**
 
 1. Move the joint to the desired mechanical zero.
-2. Read the current joint angle.
+2. Read the measured joint angle.
 3. Compute the required offset so the reported angle becomes zero:
    `ang_off = -measured_shaft_angle * ang_dir`
 4. Write `ang_off` via `uavcan.register.Access`.

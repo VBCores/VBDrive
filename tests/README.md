@@ -3,7 +3,7 @@
 ## MIT compatibility
 
 After building RelWithDebInfo, run `python3 tests/mit_control.py`. This host test
-uses the generated MITCommand/State/legacy serializers, the actual FOC handler and
+uses the generated MIT/State/legacy serializers, the actual FOC handler and
 libcanard TX/RX with MTU 8, 12, 16, 20, 24, 32, 48 and 64. It verifies the shared
 20-byte prefix, CAN FD padding and RX extent truncation, all five target fields,
 ignored legacy current-gain fields, unchanged current gains for both formats and
@@ -282,7 +282,7 @@ commit libvoltbro changes before updating its gitlink in the VBDrive commit.
 - libvoltbro: `64d23c4`, matching its origin/master.
 - VBBoot: `2adc0bf`, matching its origin/main. The STM32G431 defaults, application
   start (`0x08003000`), 8-byte EEPROM prefix, config type (`0x44AAABFF`) and boot
-  request magic remain compatible with current VBDrive main.
+  request magic remain compatible with VBDrive main firmware at the time.
 - Release and a clean RelWithDebInfo application plus bootloader and merged HEX build successfully with
   CubeCLT 1.16.0 / GCC 12.3.1. Generated native C++ traits include
   `cyphal/types.hpp`; Arduino packed headers and the old App shim are not used.

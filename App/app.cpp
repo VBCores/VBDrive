@@ -25,7 +25,7 @@
 #include <uavcan/si/unit/angle/Scalar_1_0.hpp>
 #include <uavcan/si/unit/torque/Scalar_1_0.hpp>
 #include <uavcan/si/unit/voltage/Scalar_1_0.hpp>
-#include <voltbro/foc/MITCommand_1_0.hpp>
+#include <voltbro/foc/MIT_1_0.hpp>
 #include <voltbro/foc/Servo_1_0.hpp>
 #include <voltbro/foc/State_1_0.hpp>
 
@@ -407,10 +407,10 @@ bool apply_servo_command(uint8_t type, float value) {
     }
 }
 
-class FOCCommandSub: public AbstractSubscription<voltbro_foc_MITCommand_1_0> {
+class FOCCommandSub: public AbstractSubscription<voltbro_foc_MIT_1_0> {
 public:
-    FOCCommandSub(InterfacePtr interface, CanardPortID port_id): AbstractSubscription<voltbro_foc_MITCommand_1_0>(interface, port_id) {};
-    void handler(const voltbro_foc_MITCommand_1_0& msg, CanardRxTransfer*) override {
+    FOCCommandSub(InterfacePtr interface, CanardPortID port_id): AbstractSubscription<voltbro_foc_MIT_1_0>(interface, port_id) {};
+    void handler(const voltbro_foc_MIT_1_0& msg, CanardRxTransfer*) override {
         bool is_valid = apply_mit_command(FOCTarget {
             .torque = msg._torq.newton_meter,
             .angle = msg.pos.radian,

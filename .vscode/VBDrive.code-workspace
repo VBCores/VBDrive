@@ -2,6 +2,12 @@
 	"folders": [
 		{
 			"path": ".."
+		},
+		{
+			"path": "../../ETH-FDCAN_firmware"
+		},
+		{
+			"path": "../../../../Tools/MCPs/hantek-dso2000-mcp"
 		}
 	],
 	"settings": {

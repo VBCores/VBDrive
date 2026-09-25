@@ -20,7 +20,7 @@ source = r'''
 #include <utility>
 #include <libcanard/canard.h>
 #include <voltbro/foc/command_1_0.h>
-#include <voltbro/foc/MITCommand_1_0.h>
+#include <voltbro/foc/MIT_1_0.h>
 #include <voltbro/foc/State_1_0.h>
 #include <voltbro/foc/state_simple_1_0.h>
 #include <voltbro/foc/Servo_1_0.h>
@@ -70,7 +70,7 @@ int main() {
     device=Motor{}; device.valid=false; errors=0;
     servo_sub.handler({},nullptr); assert(errors==1);
     static_assert(voltbro_foc_command_1_0_EXTENT_BYTES_==28);
-    static_assert(voltbro_foc_MITCommand_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_==20);
+    static_assert(voltbro_foc_MIT_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_==20);
     FOCCommandSub sub(0,2118);
     for (size_t mtu : {8,12,16,20,24,32,48,64}) {
         // New publisher -> old subscriber: retain the four-field prefix.
@@ -129,11 +129,11 @@ int main() {
             legacy.velocity_kp.value=5; legacy.I_kp.value=6; legacy.I_ki.value=7;
             assert(voltbro_foc_command_1_0_serialize_(&legacy,payload,&size)==0 && size==28);
             if (!old) {
-                voltbro_foc_MITCommand_1_0 msg{};
+                voltbro_foc_MIT_1_0 msg{};
                 msg._torq.newton_meter=1; msg.pos.radian=2; msg.vel.radian_per_second=3;
                 msg.pos_gain.value=4; msg.vel_gain.value=5;
                 uint8_t mit[20]{}; size=sizeof(mit);
-                assert(voltbro_foc_MITCommand_1_0_serialize_(&msg,mit,&size)==0 && size==20);
+                assert(voltbro_foc_MIT_1_0_serialize_(&msg,mit,&size)==0 && size==20);
                 assert(std::memcmp(mit,payload,20)==0);
             }
             auto alloc=+[](CanardInstance*,size_t n)->void* {return std::malloc(n);};
@@ -142,7 +142,7 @@ int main() {
             tx.node_id=42; rx.node_id=11;
             auto queue=canardTxInit(32,mtu);
             CanardRxSubscription subscription{};
-            assert(canardRxSubscribe(&rx,CanardTransferKindMessage,2118,voltbro_foc_MITCommand_1_0_EXTENT_BYTES_,
+            assert(canardRxSubscribe(&rx,CanardTransferKindMessage,2118,voltbro_foc_MIT_1_0_EXTENT_BYTES_,
                 CANARD_DEFAULT_TRANSFER_ID_TIMEOUT_USEC,&subscription)>=0);
             CanardTransferMetadata metadata{};
             metadata.priority=CanardPriorityNominal;
@@ -156,9 +156,9 @@ int main() {
                 assert(result>=0);
                 if (result==1) {
                     ++received;
-                    voltbro_foc_MITCommand_1_0 decoded{}; size_t n=transfer.payload_size;
+                    voltbro_foc_MIT_1_0 decoded{}; size_t n=transfer.payload_size;
                     assert(transfer.payload_size==20);
-                    assert(voltbro_foc_MITCommand_1_0_deserialize_(&decoded,
+                    assert(voltbro_foc_MIT_1_0_deserialize_(&decoded,
                         static_cast<const uint8_t*>(transfer.payload),&n)==0);
                     sub.handler(decoded,&transfer);
                     std::printf("MTU=%zu %s received=%zu\n",mtu,old?"legacy":"MIT",transfer.payload_size);
