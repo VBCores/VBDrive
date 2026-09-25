@@ -62,7 +62,7 @@ def same(a, b):
 
 try:
     assert read('firmware_rev') == args.revision
-    assert read('vbdrive_model') == 'M4310'
+    assert 1 <= len(read('name').encode()) <= 15
     original = {name: read(name) for name, *_ in schema}
     for name, _, mutable, _ in schema:
         if mutable == 'false':
@@ -81,7 +81,10 @@ try:
         if persistent == 'true':
             value = '-1' if kind == 'INTEGER32' else '1'
             assert 'OK' in command(name+':'+value)
-            assert float(read(name)) == float(value)
+            if kind == 'STRING':
+                assert read(name) == value
+            else:
+                assert float(read(name)) == float(value)
     assert 'ENABLED' in command('CONFIG')
     assert float(read('gear')) == 1
     assert 'Invalid value' in command('gear:256')

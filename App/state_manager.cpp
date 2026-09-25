@@ -385,6 +385,9 @@ bool VBDriveConfig::set(std::string_view param, std::string_view input, UARTResp
         if (definition->type == ParameterType::INTEGER32) value = static_cast<int32_t>(integer);
         else value = static_cast<uint32_t>(integer);
     }
+    else if (definition->type == ParameterType::STRING) {
+        value = input;
+    }
     else {
         responses.append("ERROR: Invalid value\n\r");
         return false;
@@ -399,6 +402,10 @@ bool VBDriveConfig::set(std::string_view param, std::string_view input, UARTResp
     }
     else if (definition->type == ParameterType::INTEGER32) {
         responses.append("OK: %s:%ld\n\r", definition->name.data(), std::get<int32_t>(value));
+    }
+    else if (definition->type == ParameterType::STRING) {
+        responses.append("OK: %s:%.*s\n\r", definition->name.data(),
+                         static_cast<int>(input.size()), input.data());
     }
     else {
         responses.append("OK: %s:%lu\n\r", definition->name.data(), std::get<uint32_t>(value));

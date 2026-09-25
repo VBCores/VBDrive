@@ -2,10 +2,6 @@
 #include "parameters.hpp"
 #include <cmath>
 
-#ifndef VBDRIVE_MODEL
-#error "VBDRIVE_MODEL must be defined by CMake"
-#endif
-
 #ifndef VBDRIVE_FIRMWARE_REV
 #error "VBDRIVE_FIRMWARE_REV must be defined by CMake"
 #endif
@@ -104,8 +100,8 @@ bool read_parameter(const VBDriveConfig& config, ParameterId id, ParameterValue&
         case ParameterId::CMD_ERRORS:
             value.emplace<uint32_t>(invalid_commands_counter);
             return true;
-        case ParameterId::MODEL:
-            value.emplace<std::string_view>(VBDRIVE_MODEL);
+        case ParameterId::NAME:
+            value.emplace<std::string_view>(config.name, strnlen(config.name, sizeof(config.name)));
             return true;
         case ParameterId::REVISION:
             value.emplace<std::string_view>(VBDRIVE_FIRMWARE_REV);
@@ -156,6 +152,16 @@ ParameterWriteResult write_persistent_parameter(
     const ParameterValue& value,
     bool apply_runtime
 ) {
+    if (id == ParameterId::NAME) {
+        const auto name = std::get<std::string_view>(value);
+        if (name.empty() || name.size() >= sizeof(config.name)) return ParameterWriteResult::INVALID;
+        for (unsigned char byte : name) {
+            if (byte < 0x20 || byte == 0x7F) return ParameterWriteResult::INVALID;
+        }
+        memset(config.name, 0, sizeof(config.name));
+        memcpy(config.name, name.data(), name.size());
+        return ParameterWriteResult::OK;
+    }
     if (id >= ParameterId::SERVO_POS_P_GAIN && id <= ParameterId::SERVO_TR_VEL) {
         if (id == ParameterId::SERVO_TR_FORM) {
             const auto form = std::get<uint32_t>(value);

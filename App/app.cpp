@@ -492,6 +492,12 @@ static void handle_parameter_register(
                 }
                 break;
             case ParameterType::STRING:
+                if (v_in._tag_ == REGISTER_STRING_TAG) {
+                    requested = std::string_view(
+                        reinterpret_cast<const char*>(v_in._string.value.elements),
+                        v_in._string.value.count);
+                    parsed = true;
+                }
                 break;
         }
         if (parsed) {

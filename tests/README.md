@@ -22,10 +22,10 @@ parameter's Serial write/EXIT rollback and Cyphal write,
 readonly write rejection, CONFIG snapshots, RESET rollback, SAVE after an invalid
 write, MIT/Servo commands, numeric validation, delayed EEPROM writes,
 configuration before motor creation and the shared bootloader register. The EEPROM config size
-and placements are checked (102 bytes; config 0, calibration 103).
+and placements are checked (118 bytes; config 0, calibration 119).
 Unified config writes/readback and preservation of bytes outside the config
 are tested with a byte-addressed EEPROM double. Servo registers
-are included in the write/rollback tests, with negative/non-finite gain rejection
+are included in the write/rollback tests, with `name` length and persistence, negative/non-finite gain rejection
 and transient-form validation. The communication test also checks all four Servo
 setpoint modes, invalid modes and wire equality with legacy specific_control.
 It also exercises the actual FIFO/line consumer with split commands, multiple lines,

@@ -12,6 +12,7 @@ and persistent; runtime controls `is_on` and `bootloader` are marked separately.
 | Parameter | Description | Type | Default |
 | --- | --- | --- | --- |
 | `gear` | Gear ratio of the drive | Integer | `36` |
+| `name` | Writable device name (1-15 bytes) | String | `M4310` |
 | `max_i` | Maximum motor current (A) | Float | `NaN` |
 | `max_spd` | Maximum motor speed target (rad/s) | Float | `NaN` |
 | `max_tq` | Maximum torque output (Nm) | Float | `NaN` |
@@ -96,13 +97,14 @@ Changing a gain resets that controller's state but retains its target; rewriting
 the same gain or changing a target within the same mode does not reset it.
 Changing control mode resets both Servo integrators. Disable/enable clears the old
 target and waits at zero effort for a new command. TORQUE, VOLTAGE and MIT retain
-their control laws. Names are string views (up to 16 characters),
+their control laws. Register identifiers are string views (up to 16 characters),
 not heap-allocated strings. The composite `servo_params` register is not used.
 
-All settings, including Servo, are stored in one 102-byte config at EEPROM offset 0.
-Calibration starts at 103, followed by encoder state. There is no old-layout migration.
-Provision devices with erased external EEPROM, then configure and calibrate afresh;
-flashing MCU firmware alone does not erase external EEPROM.
+All settings, including Servo and `name`, are stored in one 118-byte config at EEPROM offset 0.
+Calibration starts at 119, followed by encoder state. The new config type rejects
+the old EEPROM layout; firmware initialization replaces the old config with defaults.
+Back up EEPROM before an upgrade, then reprovision and calibrate the device.
+Flashing MCU firmware alone does not erase external EEPROM.
 
 
 ---
@@ -114,7 +116,6 @@ All entries are non-persistent and readable without CONFIG. Writes are rejected.
 | Name | Type | Meaning |
 | --- | --- | --- |
 | `cmd_errors` | natural32 | Rejected Serial/Cyphal movement commands |
-| `vbdrive_model` | string | CMake constant M4310 |
 | `firmware_rev` | string | 16 hexadecimal digits of the VBDrive HEAD commit |
 | `bus_voltage` | real32 | Bus voltage, V |
 | `bus_current` | real32 | Working-current measurement, A; not a separate DC-link sensor |
@@ -324,5 +325,7 @@ The controller also publishes standard Cyphal messages:
 
 Use `Release` configuration - other won't work due to timing or size issues. Initialize submodules before configuring. DSDL C headers and C++ traits are generated into the build directory using the CMake module and templates supplied by libcxxcanard. Neither the Arduino `src/` tree nor an `App/cyphal.h` shim is used.
 
-`VBDrive_full.hex` combines VBBoot at `0x08000000` with VBDrive at `0x08003000`. The bootloader-compatible configuration prefix uses type `0x44AAABFF`. Only fresh
-EEPROM provisioning is supported; existing configuration/calibration layouts are not migrated.
+`VBDrive_full.hex` combines VBBoot at `0x08000000` with VBDrive at `0x08003000`.
+The bootloader-compatible configuration prefix uses type `0x44AAAC00`; update
+the application and VBBoot together. Existing configuration/calibration layouts
+are not migrated.

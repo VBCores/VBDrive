@@ -135,8 +135,8 @@ int main() {
         assert(uart_frames.size()==100);
         for (const auto& frame : uart_frames) assert(frame=="line\r\n");
     }
-    static_assert(sizeof(VBDriveConfig)==102);
-    static_assert(CONFIG_PLACEMENT==0 && CALIBRATION_PLACEMENT==103);
+    static_assert(sizeof(VBDriveConfig)==118);
+    static_assert(CONFIG_PLACEMENT==0 && CALIBRATION_PLACEMENT==119);
     auto& config = manager.get_config();
     config.apply_servo_config();
     assert(device.position.kp==150 && device.position.ki==200 && device.position.kd==10);
@@ -157,6 +157,8 @@ int main() {
     }
     manager.set_state(CommandState::RUNNING);
     assert(command("firmware_rev:?\r\n").find("0123456789abcdef")!=std::string::npos);
+    assert(command("name:?").find("name:M4310")==0);
+    assert(command("vbdrive_model:?").find("Unknown parameter")!=std::string::npos);
     for (size_t i=0; i<PARAMETER_CATALOG.size();++i) {
         const auto& d=PARAMETER_CATALOG[i];
         auto q=command(std::string(d.name)+":?");
@@ -198,6 +200,14 @@ int main() {
     }
     command("CONFIG"); command("kp:9"); command("kp:bad"); command("SAVE");
     assert(eeprom.writes==1 && config.kp==9);
+    assert(command("name:axis-01").find("CONFIG mode required")!=std::string::npos);
+    command("CONFIG");
+    assert(command("name:left drive").find("OK: name:left drive")==0);
+    assert(command("name:?").find("name:left drive")==0);
+    assert(command("name:").find("Invalid value")!=std::string::npos);
+    assert(command("name:0123456789abcdef").find("Invalid value")!=std::string::npos);
+    assert(command("name:123456789012345").find("OK: name:123456789012345")==0);
+    command("EXIT"); assert(command("name:?").find("name:M4310")==0);
     command("CONFIG"); command("ang_dir:-1"); assert(config.angle_direction==-1);
     assert(command("ang_dir:0").find("Invalid")!=std::string::npos);
     assert(command("gear:0").find("Invalid")!=std::string::npos);
@@ -221,13 +231,23 @@ int main() {
         if (!d.is_persistent) continue;
         if (d.type==ParameterType::REAL32) fill_register_real32(input,1);
         else if (d.type==ParameterType::INTEGER32) fill_register_integer32(input,1);
+        else if (d.type==ParameterType::STRING) fill_register_string(input,"axis-01");
         else fill_register_natural32(input,1);
         auto out=access(d.name,input);
         assert(out._tag_==input._tag_);
         if(d.type==ParameterType::REAL32) assert(out.real32.value.elements[0]==1);
         else if(d.type==ParameterType::INTEGER32) assert(out.integer32.value.elements[0]==1);
+        else if(d.type==ParameterType::STRING) assert(std::string_view(reinterpret_cast<char*>(out._string.value.elements),out._string.value.count)=="axis-01");
         else assert(out.natural32.value.elements[0]==1);
     }
+    persist_pending_config_if_needed();
+    VBDriveConfig named;
+    eeprom.read(&named,0); assert(std::string_view(named.name)=="axis-01");
+    fill_register_string(input,"1234567890123456"); access("name",input);
+    assert(std::string_view(config.name)=="axis-01" && !config_save_pending);
+    fill_register_natural32(input,1); access("name",input);
+    assert(std::string_view(config.name)=="axis-01" && !config_save_pending);
+    assert(write_persistent_parameter(config,ParameterId::NAME,std::string_view("bad\nname"),false)==ParameterWriteResult::INVALID);
     fill_register_integer32(input,0); access("is_on",input); assert(!device.on);
     motor=nullptr; fill_register_natural32(input,13); access("node_id",input); assert(config.node_id==13);
     assert(command("STOP").find("OK: STOP")==0);
@@ -478,7 +498,7 @@ bool config_save_pending=false;
     source += parsers + config_methods + parameters + utils + deferred + callback + shared + receive + '\nvoid drain_serial(){process_serial(); for(int i=0;i<16;++i) serial_service();}\n' + TEST
     (tmp / "test.cpp").write_text(source)
     subprocess.run([os.environ.get("CXX", "c++"), "-std=c++20", "-DSTM32G4",
-                    '-DVBDRIVE_MODEL="M4310"', '-DVBDRIVE_FIRMWARE_REV="0123456789abcdef"',
+                    '-DVBDRIVE_FIRMWARE_REV="0123456789abcdef"',
                     "-I"+str(tmp), "-I"+str(ROOT/"App"), "-I"+str(ROOT/"Drivers/libvoltbro"),
                     "-I"+str(ROOT/"build/Release/cyphal_types/c"), str(tmp/"test.cpp"), "-o", str(tmp/"test")], check=True)
     subprocess.run([str(tmp/"test")], check=True)

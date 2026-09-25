@@ -35,7 +35,7 @@ namespace VBDriveDefaults {
     inline constexpr float I_LPF = 0.0925f;
 }  // namespace VBDriveDefaults
 
-inline constexpr uint32_t VBDRIVE_CONFIG_TYPE_ID = 0x44AAABFF;
+inline constexpr uint32_t VBDRIVE_CONFIG_TYPE_ID = 0x44AAAC00;
 
 struct __attribute__((packed)) VBDriveConfig: public BaseConfigData {
     static constexpr uint32_t TYPE_ID = VBDRIVE_CONFIG_TYPE_ID;
@@ -64,6 +64,7 @@ struct __attribute__((packed)) VBDriveConfig: public BaseConfigData {
     float servo_vel_i_gain = NAN;
     uint32_t servo_transient_form = 0; // Unset; integer equivalent of NAN.
     float servo_transient_vel = NAN;
+    char name[16] = "vbdrive"; // 15-byte value plus terminator; no heap allocation.
 
     VBDriveConfig(): BaseConfigData() {
         type_id = VBDriveConfig::TYPE_ID;
