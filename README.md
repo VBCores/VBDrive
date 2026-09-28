@@ -121,6 +121,12 @@ All entries are non-persistent and readable without CONFIG. Writes are rejected.
 | `bus_current` | real32 | Working-current measurement, A; not a separate DC-link sensor |
 | `temp_mcu` | real32 | MCU temperature, K |
 | `temp_stator` | real32 | Stator temperature, K |
+
+Both temperature registers report kelvins: subtract 273.15 to get degrees Celsius.
+`temp_mcu` is the temperature of the embedded STM32G431 die in the central part
+of STSPIN32G4, not the temperature of its package surface or ambient air. `temp_stator`
+uses the external THERM1 divider;
+its value is the motor sensor temperature.
 | `is_fault` | bit | Reports false; DRV_FAULT integration remains deferred |
 | `encoder_shaft` | natural32 | Raw external encoder counts |
 | `encoder_rotor` | natural32 | Raw internal encoder counts |

@@ -352,3 +352,18 @@ command and temporary 0.2 A / 1 N m / 0.1 rad/s limits. The encoder changed
 about 10 counts. Further physical movement was not attempted. Final readback:
 `is_on=0`, `ang_dir=1`, and the original NaN user limits restored. Logs are in
 `var/ang-dir-*-20260928.json`.
+
+## Temperature conversion, 2026-09-28
+
+`tests/temperature_conversion.py` compiles the actual VBInverter conversion body
+with factory and ADC samples; it checks VREFINT normalization, Kelvin conversion,
+stator temperature and an invalid zero VREFINT sample. The Release build passed.
+On VBDrive 01 the verified image measured VREFINT=1493, ADC temperature=997,
+factory VREFINT=1657 and temperature points 1031/1367. These imply
+VDDA=3.330 V and temp_mcu=325.625 K (52.475 C). ADC2 stator=1757 implies
+temp_stator=304.721 K (31.571 C). The driver was left disabled.
+ADC1 scan duration is calculated as 18.25 us within the 25 us trigger period.
+CubeMX 6.15 later regenerated the main project from VBDrive.ioc with FW_G4 V1.6.1.
+The final .ioc reloads without ADC1 errors, and the regenerated Release build passes.
+This regeneration was not flashed to hardware.
+See `var/temperature-diagnostics-20260928.md` for the raw evidence.
