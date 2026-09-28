@@ -52,7 +52,7 @@ volatile uint32_t value_invocations = 0;
 static uint16_t profile_sample_counter = 0;
 #endif
 
-__attribute__((hot)) void main_callback() {
+extern "C" __attribute__((hot)) void main_callback() {
     auto& app_manager = get_app_manager();
 
     #ifdef ENABLE_DT
@@ -146,8 +146,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
         serial_tick();
     } else if (htim->Instance == TIM2) {
         HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
-    } else if (htim->Instance == TIM4) {
-        main_callback();
     }
 }
 

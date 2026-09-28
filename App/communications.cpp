@@ -76,7 +76,8 @@ void heartbeat() {
 
 __attribute__((hot)) void cyphal_loop() {
     if (_is_cyphal_on) {
-        cyphal_interface->loop();
+        cyphal_interface->process_canard_rx(false);
+        cyphal_interface->process_canard_tx();
     }
     if (_is_cyphal_on) {
         millis current_t = millis_32();
@@ -91,6 +92,9 @@ __attribute__((hot)) void cyphal_loop() {
     if (delay_cyphal_until_millis != 0 &&
         delay_cyphal_until_millis <= millis_32()) {
         restart_cyphal();
+    }
+    if (_is_cyphal_on) {
+        cyphal_interface->update_fdcan_status();
     }
 }
 

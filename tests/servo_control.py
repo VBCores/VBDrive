@@ -104,7 +104,6 @@ float servo_current(FOC& motor) {
     float i_q_set;
     const float controller_response=motor.servo_torque();
     const auto& drive_info=motor.drive_info;
-    const float gear_ratio_f=drive_info.common.gear_ratio;
     auto get_direction_multiplier=[&] {return motor.get_direction_multiplier();};
 ''' + current_conversion + r'''
     return i_q_set;
@@ -196,16 +195,16 @@ int main() {
     motor.shaft_angle=0; motor.shaft_velocity=0;
     for (float sign : {-1.f,1.f}) {
         motor.servo_pos_reg.set_integral_error((0) / motor.servo_pos_reg.get_config().ki); motor.set_angle_point(sign);
-        near(motor.servo_torque(),2*sign); near(integral(motor.servo_pos_reg),0);
+        near(motor.servo_torque(),sign); near(integral(motor.servo_pos_reg),0);
     }
     motor.servo_pos_reg.set_integral_error((2) / motor.servo_pos_reg.get_config().ki); motor.set_angle_point(-.01f);
     motor.servo_torque(); assert(integral(motor.servo_pos_reg)<2);
     motor.drive_runtime_config.current_limit=.25f;
-    motor.servo_torque(); assert(std::fabs(integral(motor.servo_pos_reg))<=.25f);
+    motor.servo_torque(); assert(std::fabs(integral(motor.servo_pos_reg))<=.125f);
     motor.drive_runtime_config.current_limit=30;
     motor.update_servo_config(SetPointType::POSITION,{.ki=4,.kd=1});
     motor.servo_pos_reg.set_integral_error((2) / motor.servo_pos_reg.get_config().ki); motor.shaft_velocity=-4;
-    near(motor.servo_torque(),2); assert(integral(motor.servo_pos_reg)<2); // Unwind despite saturation.
+    near(motor.servo_torque(),1); assert(integral(motor.servo_pos_reg)<2); // Unwind despite saturation.
     motor.set_voltage_point(0); near(integral(motor.servo_pos_reg),0); near(integral(motor.servo_vel_reg),0);
     motor.set_foc_point({.torque=1}); motor.set_angle_point(0); near(motor.foc_target.torque,0);
 
@@ -218,9 +217,9 @@ int main() {
         motor.shaft_angle=.5f*direction;
         motor.drive_runtime_config.user_angle_offset=.25f;
         motor.set_angle_point(1);
-        near(servo_current(motor),.25f*direction);
+        near(servo_current(motor),1.f*direction);
         motor.drive_info.common.gear_ratio=8;
-        near(servo_current(motor),.125f*direction);
+        near(servo_current(motor),1.f*direction);
         motor.drive_info.common.gear_ratio=4;
     }
     motor.drive_info.torque_const=1;
@@ -239,6 +238,24 @@ int main() {
         assert(motor.set_foc_point({.torque=.2f, .angle=.1f, .velocity=.05f,
                                     .angle_kp=2.f, .velocity_kp=4.f}));
         near(mit_current(motor), .42f*direction);
+    }
+    // With zero I and no MIT feedforward, equal gains must request equal Iq.
+    for (unsigned gear : {1U, 10U, 36U}) {
+        FOC equivalent;
+        equivalent.drive_info.torque_const=1;
+        equivalent.drive_info.common.gear_ratio=gear;
+        equivalent.shaft_angle=.1f; equivalent.shaft_velocity=.02f;
+        equivalent.update_servo_config(SetPointType::POSITION,{.kp=2,.kd=.5f});
+        assert(equivalent.set_angle_point(.2f));
+        const float servo_position_current=servo_current(equivalent);
+        assert(equivalent.set_foc_point({.angle=.2f, .velocity=0, .torque=0,
+                                         .angle_kp=2, .velocity_kp=.5f}));
+        near(servo_position_current,mit_current(equivalent));
+        equivalent.update_servo_config(SetPointType::VELOCITY,{.kp=.5f,.ki=0});
+        assert(equivalent.set_velocity_point(.1f));
+        const float servo_velocity_current=servo_current(equivalent);
+        assert(equivalent.set_foc_point({.velocity=.1f, .velocity_kp=.5f}));
+        near(servo_velocity_current,mit_current(equivalent));
     }
     VBDrive device;
     device.update_servo_config(SetPointType::POSITION,{.kp=1,.ki=1});

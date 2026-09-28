@@ -67,13 +67,21 @@ Servo parameters are shared Serial/Cyphal read/write persistent registers:
 | `servo_tr_vel` | real32 | 0 |
 
 Gains and transient velocity must be finite and non-negative. POSITION uses
-`torque = Kp * (target - position) + I - Kd * velocity`; VELOCITY uses
-`torque = Kp * (target - velocity) + I`. These are independent controllers, running
-every 25 microseconds, with `I += Ki * error * dt` in output-shaft N m. Torque is
-limited by hardware, user torque and available current (including stall derating),
-with conditional integration to prevent windup. Position D uses measured velocity,
+`motor_torque = Kp * (target - position) + I - Kd * velocity`; VELOCITY uses
+`motor_torque = Kp * (target - velocity) + I`. These are independent controllers,
+running every 25 microseconds, with `I += Ki * error * dt` in motor-side N m.
+Torque is limited by hardware, user output-shaft torque (converted through
+`gear`) and available current (including stall derating), with conditional
+integration to prevent windup. Position D uses measured velocity,
 so target steps do not cause derivative kick. `max_spd` validates VELOCITY targets;
 it does not limit actual speed in POSITION. Zero gains produce zero torque.
+With `Ki = 0`, MIT feedforward torque and desired velocity both zero, matching
+POSITION `Kp` and `Kd` values request the same motor current in MIT and SERVO.
+For VELOCITY, matching `Kp` values and `Ki = 0` likewise give the same current
+as MIT velocity control with zero position gain and feedforward.
+Saved Servo gains tuned for the previous output-shaft torque interpretation
+should be retuned before motion after a firmware update. Dividing those gains
+by `gear` approximately preserves the old unsaturated current request.
 `servo_tr_form` and `servo_tr_vel` are stored but do not generate trajectories.
 The wire format matches legacy `specific_control` for modes 0–3; other modes are rejected.
 
