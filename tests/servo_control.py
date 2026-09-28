@@ -110,6 +110,21 @@ float servo_current(FOC& motor) {
     return i_q_set;
 }
 '''
+mit_start = implementation.index("i_q_set =", implementation.index("if (point_type == SetPointType::UNIVERSAL)"))
+mit_expression = implementation[mit_start:implementation.index(";", mit_start) + 1]
+source += r'''
+float mit_current(FOC& motor) {
+    const auto& foc_target=motor.foc_target;
+    const auto& drive_info=motor.drive_info;
+    const float gear_ratio_f=drive_info.common.gear_ratio;
+    auto get_angle=[&] {return motor.get_angle();};
+    auto get_velocity=[&] {return motor.get_velocity();};
+    auto get_direction_multiplier=[&] {return motor.get_direction_multiplier();};
+    float i_q_set;
+''' + mit_expression + r'''
+    return i_q_set;
+}
+'''
 source += r'''
 float integral(const PIDRegulator& regulator) { return regulator.get_integral_error() * regulator.get_config().ki; }
 void near(float actual, float expected) { assert(std::fabs(actual-expected)<1e-5f); }
@@ -207,6 +222,23 @@ int main() {
         motor.drive_info.common.gear_ratio=8;
         near(servo_current(motor),.125f*direction);
         motor.drive_info.common.gear_ratio=4;
+    }
+    motor.drive_info.torque_const=1;
+    motor.drive_info.common.gear_ratio=10;
+    motor.drive_runtime_config.user_angle_offset=0;
+    motor.shaft_angle=0;
+    motor.shaft_velocity=0;
+    for (int direction : {-1,1}) {
+        motor.drive_runtime_config.user_angle_direction=direction;
+        assert(motor.set_foc_point({.angle=.1f, .angle_kp=2.f}));
+        near(mit_current(motor), .2f*direction);
+        assert(motor.set_foc_point({.velocity=.05f, .velocity_kp=4.f}));
+        near(mit_current(motor), .2f*direction);
+        assert(motor.set_foc_point({.torque=.2f}));
+        near(mit_current(motor), .02f*direction);
+        assert(motor.set_foc_point({.torque=.2f, .angle=.1f, .velocity=.05f,
+                                    .angle_kp=2.f, .velocity_kp=4.f}));
+        near(mit_current(motor), .42f*direction);
     }
     VBDrive device;
     device.update_servo_config(SetPointType::POSITION,{.kp=1,.ki=1});

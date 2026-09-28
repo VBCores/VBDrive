@@ -205,7 +205,7 @@ BOOT; it schedules a reboot without saving staged settings. `bootloader:0` does
 not cancel an accepted request. The bool register is identical in Cyphal.
 Calibration is an isolated blocking procedure: no commands, including STOP,
 queries or bootloader requests, are processed until it finishes. Serial input
-received during calibration is discarded, not executed afterwards. Wait for
+received during calibration is discarded, not executed afterwards.
 `CALIBRATE OK` acknowledges acceptance. `CALIBRATE 1/10 DONE` through
 `CALIBRATE 10/10 DONE` are emitted after the ten movement stages;
 `CALIBRATE FINISH` follows successful EEPROM save and
@@ -289,14 +289,17 @@ setup node ID derived from the MCU UID.
 
 > NOTE: angle offset only makes sense with ang_enc=1 (shaft output encoder). Rotor encoder (0) is not absolute in reference to shaft position
 
-All joint-angle values exposed over Cyphal use the same corrected frame:
+Control positions and velocities over Serial and Cyphal use the corrected joint frame:
 
 * `reported_angle = measured_shaft_angle * ang_dir + ang_off`
-* `voltbro.foc.MIT.pos`, `voltbro.foc.Servo` position targets, `min_ang`, and `max_ang` are all interpreted in that corrected frame
+* `voltbro.foc.MIT.pos`/`vel`, `voltbro.foc.Servo` position/velocity targets, `min_ang`, and `max_ang` are all interpreted in that corrected frame
+* MIT position, velocity and feedforward torque terms are converted together to the physical motor direction
 * Positive `ang_off` increases the reported and commanded joint angle for the same physical shaft position
 * Units are radians
 
 This means limit enforcement and position control are applied after the offset is added, so the configured limits match the angles seen by higher-level kinematics.
+Over Serial, set `ang_dir` in CONFIG and run APPLY to make it active.
+Cyphal register writes apply at runtime and persist to EEPROM.
 
 ### **Calibration Workflow**
 
