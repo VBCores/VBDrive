@@ -58,7 +58,7 @@ def command(text, expected):
     os.write(fd, (text + '\r\n').encode())
     while time.monotonic() - start < .25:
         for reply in read_lines(.01):
-            assert not reply.startswith('ERROR'), (text, reply)
+            assert ' ERROR:' not in reply, (text, reply)
             if reply.startswith(expected):
                 latency = time.monotonic() - start
                 report['commands'].append({'command': text, 'reply': reply, 'latency_s': latency})
@@ -68,12 +68,12 @@ def command(text, expected):
 
 try:
     termios.tcflush(fd, termios.TCIFLUSH)
-    command('log_off', 'OK: log_off')
-    command('STOP', 'OK: STOP')
-    command('is_on:0', 'OK: is_on:0')
+    command('log_off', 'log_off OK')
+    command('STOP', 'STOP OK')
+    command('is_on:0', 'is_on:0 OK')
     if args.motion:
-        command('is_on:1', 'OK: is_on:1')
-    command('log_on', 'OK: log_on')
+        command('is_on:1', 'is_on:1 OK')
+    command('log_on', 'log_on OK')
     modes = ['servo_cmd: 0 0', 'servo_cmd: 0 0.05', 'servo_cmd: 0 -0.05',
              'mit_cmd: 0 0.05 0 0 2', 'position_step', 'servo_cmd: 3 0', 'servo_cmd: 1 0']
     for mode in modes:
@@ -81,7 +81,7 @@ try:
             assert report['states']
             mode = f"servo_cmd: 2 {report['states'][-1][1] + .03:.6f}"
         if args.motion:
-            command(mode, 'OK: ' + mode.split(':')[0])
+            command(mode, mode.split(':')[0] + ' OK')
         phase_start = time.monotonic()
         for i in range(3 * args.rate):
             command('firmware_rev:?', 'firmware_rev:')
@@ -89,7 +89,7 @@ try:
             while time.monotonic() < deadline:
                 read_lines(min(.01, deadline - time.monotonic()))
         print(mode, 3 * args.rate, 'replies, states:', len(report['states']), flush=True)
-        command('STOP', 'OK: STOP')
+        command('STOP', 'STOP OK')
     assert len(report['states']) >= 1900, len(report['states'])
     intervals = [b[0] - a[0] for a, b in zip(report['states'], report['states'][1:])]
     assert max(intervals) < .05, max(intervals)
@@ -98,9 +98,9 @@ try:
     report['passed'] = True
 finally:
     try:
-        command('STOP', 'OK: STOP')
-        command('log_off', 'OK: log_off')
-        command('is_on:0', 'OK: is_on:0')
+        command('STOP', 'STOP OK')
+        command('log_off', 'log_off OK')
+        command('is_on:0', 'is_on:0 OK')
         assert command('is_on:?', 'is_on:') == 'is_on:0'
     except Exception as exc:
         report['cleanup_error'] = str(exc)

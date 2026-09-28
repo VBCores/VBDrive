@@ -10,6 +10,8 @@ VBDrive* get_motor();
 bool apply_mit_command(FOCTarget target);
 bool apply_servo_command(uint8_t type, float value);
 void reboot_to_bootloader();
+bool is_able_to_calibrate();
+bool do_calibrate();
 bool parse_serial_number(std::string_view input, int& value);
 bool parse_serial_number(std::string_view input, float& value);
 
@@ -142,17 +144,26 @@ public:
         HAL_UART_Transmit_DMA(huart, reinterpret_cast<uint8_t*>(buffer), std::min(static_cast<size_t>(written), buffer_size - 1));
     }
 
-    void set_calibration_finished() {
-        BaseConfigurator::app_state = CommandState::RUNNING;
-        char message[] = "Calibration finished\n\r\0";
-        send_message(message);
-    }
-
     bool is_calibration_allowed() const {
         return BaseConfigurator::app_state == CommandState::CALIBRATING;
     }
 
     void process_command(std::string_view command, UARTResponseAccumulator& responses) override {
+        if (command == CALIBRATE_COMMAND) {
+            if (!is_able_to_calibrate()) {
+                responses.append("CALIBRATE ERROR: conditions not met\r\n");
+            } else {
+                send_message("CALIBRATE OK\r\n");
+                if (!do_calibrate()) {
+                    wait_for_uart();
+                    responses.append("CALIBRATE ERROR: failed\r\n");
+                } else {
+                    wait_for_uart();
+                    responses.append("CALIBRATE FINISH\r\n");
+                }
+            }
+            return;
+        }
         if (command == "INFO") {
             print_info(responses);
             return;
@@ -173,21 +184,21 @@ public:
         }
         if (command == STOP_COMMAND) {
             if (auto motor = get_motor()) motor->set_voltage_point(0.0f);
-            responses.append("OK: STOP\r\n");
+            responses.append("STOP OK\r\n");
             return;
         }
         if (command == STOP_LOGGING_COMMAND) {
             _is_logging = false;
-            responses.append("OK: log_off\r\n");
+            responses.append("log_off OK\r\n");
             return;
         }
         if (command == START_LOGGING_COMMAND) {
             if (app_state != CommandState::RUNNING) {
-                responses.append("ERROR: RUNNING mode required\r\n");
+                responses.append("log_on ERROR: RUNNING mode required\r\n");
                 return;
             }
             _is_logging = true;
-            responses.append("OK: log_on\r\n");
+            responses.append("log_on OK\r\n");
             return;
         }
         auto values = BaseConfigurator::split_parameter(command);
@@ -195,7 +206,8 @@ public:
             auto [param, value] = *values;
             if (param == "mit_cmd" || param == "servo_cmd") {
                 if (app_state != CommandState::RUNNING) {
-                    responses.append("ERROR: RUNNING mode required\r\n");
+                    responses.append("%.*s ERROR: RUNNING mode required\r\n",
+                                     static_cast<int>(param.size()), param.data());
                     return;
                 }
                 std::array<std::string_view, 5> args{};
@@ -227,8 +239,9 @@ public:
                 }
                 if (!valid) {
                     record_invalid_command();
-                    responses.append("ERROR: Invalid target\r\n");
-                } else responses.append("OK: %s\r\n", param == "mit_cmd" ? "mit_cmd" : "servo_cmd");
+                    responses.append("%.*s ERROR: Invalid target\r\n",
+                                     static_cast<int>(param.size()), param.data());
+                } else responses.append("%.*s OK\r\n", static_cast<int>(param.size()), param.data());
                 return;
             }
             if (value == "?") {
@@ -237,16 +250,16 @@ public:
             }
             const auto* definition = find_parameter(param);
             if (!definition) {
-                responses.append("ERROR: Unknown parameter\r\n");
+                responses.append("%.*s ERROR: Unknown parameter\r\n", static_cast<int>(param.size()), param.data());
                 return;
             }
             if (definition && !definition->is_mutable) {
-                responses.append("ERROR: Read-only parameter\n\r");
+                responses.append("%.*s ERROR: Read-only parameter\r\n", static_cast<int>(param.size()), param.data());
                 return;
             }
             if (definition && !definition->is_persistent && definition->is_mutable) {
                 if (definition->id == ParameterId::IS_ON && BaseConfigurator::app_state != CommandState::RUNNING) {
-                    responses.append("ERROR: RUNNING mode required\n\r");
+                    responses.append("%.*s ERROR: RUNNING mode required\r\n", static_cast<int>(param.size()), param.data());
                     return;
                 }
                 bool enabled = false;
@@ -257,31 +270,31 @@ public:
                     enabled = true;
                 }
                 else {
-                    responses.append("ERROR: Invalid value\n\r");
+                    responses.append("%.*s ERROR: Invalid value\r\n", static_cast<int>(param.size()), param.data());
                     return;
                 }
                 ParameterValue parameter_value = enabled;
                 if (write_runtime_parameter(definition->id, parameter_value) == ParameterWriteResult::OK) {
-                    responses.append("OK: %s:%u\n\r", definition->name.data(), enabled ? 1U : 0U);
+                    responses.append("%s:%u OK\r\n", definition->name.data(), enabled ? 1U : 0U);
                 }
                 else {
-                    responses.append("ERROR: Parameter unavailable\n\r");
+                    responses.append("%.*s ERROR: Parameter unavailable\r\n", static_cast<int>(param.size()), param.data());
                 }
                 return;
             }
             if (definition && definition->is_persistent && BaseConfigurator::app_state != CommandState::CONFIG) {
-                responses.append("ERROR: CONFIG mode required\n\r");
+                responses.append("%.*s ERROR: CONFIG mode required\r\n", static_cast<int>(param.size()), param.data());
                 return;
             }
         }
         if (!values && command != CONFIG_COMMAND && command != "EXIT" &&
             command != SAVE_COMMAND && command != "APPLY" && command != "RESET") {
-            responses.append("ERROR: Unknown command\r\n");
+            responses.append("%.*s ERROR: Unknown command\r\n", static_cast<int>(command.size()), command.data());
             return;
         }
         if (command == CONFIG_COMMAND) {
             if (app_state == CommandState::CONFIG) {
-                responses.append("CONFIG MODE ENABLED\n\r");
+                responses.append("CONFIG OK: mode enabled\r\n");
                 return;
             }
             _is_logging = false;
@@ -293,7 +306,7 @@ public:
             do_save = false;
             app_state = state_before_config;
             if (app_state == CommandState::RUNNING) turn_on();
-            responses.append("CONFIG MODE EXITED, CHANGES DISCARDED\n\r");
+            responses.append("EXIT OK: changes discarded\r\n");
             return;
         }
         const bool apply_servo = app_state == CommandState::CONFIG && command == SAVE_COMMAND;

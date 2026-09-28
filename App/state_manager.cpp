@@ -56,13 +56,6 @@ bool parse_serial_number(std::string_view str, float& out_val) {
 }
 
 
-constexpr auto make_action(auto f1, auto f2) {
-    return std::make_tuple(
-        std::function<bool()>(f1),
-        std::function<bool()>(f2)
-    );
-}
-
 DriveStateController drive_state_controller(
     &huart2,
     get_eeprom(),
@@ -78,9 +71,7 @@ DriveStateController drive_state_controller(
             motor->stop();
         }
     },
-    DriveStateController::ActionsMap{
-        { "CALIBRATE", make_action(is_able_to_calibrate, do_calibrate)}
-    }
+    DriveStateController::ActionsMap{}
 );
 
 DriveStateController& get_app_manager() {
@@ -209,7 +200,7 @@ extern "C" void serial_service() {
         if (lost) {
             length = 0;
             discarding = false; // The ISR already discarded through the next delimiter.
-            manager.send_message("ERROR: Serial input overflow\r\n");
+            manager.send_message("SERIAL ERROR: input overflow\r\n");
             return;
         }
         if (!present) break;
@@ -242,7 +233,7 @@ extern "C" void serial_service() {
             if (length == sizeof(line) - 1 || byte == '\0') {
                 length = 0;
                 discarding = true;
-                manager.send_message("ERROR: Invalid or overlong command\r\n");
+                manager.send_message("SERIAL ERROR: Invalid or overlong command\r\n");
                 return;
             } else line[length++] = byte;
         }
@@ -329,12 +320,12 @@ void VBDriveConfig::print_self(UARTResponseAccumulator& responses) {
 void VBDriveConfig::get(std::string_view param, UARTResponseAccumulator& responses) {
     const auto* definition = find_parameter(param);
     if (!definition) {
-        responses.append("ERROR: Unknown parameter\n\r");
+        responses.append("%.*s ERROR: Unknown parameter\r\n", static_cast<int>(param.size()), param.data());
         return;
     }
     ParameterValue value{};
     if (!read_parameter(*this, definition->id, value)) {
-        responses.append("ERROR: Parameter unavailable\n\r");
+        responses.append("%.*s ERROR: Parameter unavailable\r\n", static_cast<int>(param.size()), param.data());
         return;
     }
     switch (definition->type) {
@@ -359,13 +350,12 @@ void VBDriveConfig::get(std::string_view param, UARTResponseAccumulator& respons
 bool VBDriveConfig::set(std::string_view param, std::string_view input, UARTResponseAccumulator& responses, bool apply_runtime) {
     const auto* definition = find_parameter(param);
     if (!definition) {
-        responses.append("ERROR: Unknown parameter\n\r");
+        responses.append("%.*s ERROR: Unknown parameter\r\n", static_cast<int>(param.size()), param.data());
         return false;
     }
     if (!definition->is_persistent) {
-        responses.append(definition->is_mutable
-            ? "ERROR: Parameter unavailable\n\r"
-            : "ERROR: Read-only parameter\n\r");
+        responses.append("%.*s ERROR: %s\r\n", static_cast<int>(param.size()), param.data(),
+                         definition->is_mutable ? "Parameter unavailable" : "Read-only parameter");
         return false;
     }
 
@@ -373,13 +363,13 @@ bool VBDriveConfig::set(std::string_view param, std::string_view input, UARTResp
     int integer = 0;
     if (definition->type == ParameterType::REAL32) {
         if (!parse_serial_number(input, value.emplace<float>())) {
-            responses.append("ERROR: Invalid value\n\r");
+            responses.append("%.*s ERROR: Invalid value\r\n", static_cast<int>(param.size()), param.data());
             return false;
         }
     }
     else if (definition->type == ParameterType::NATURAL32 || definition->type == ParameterType::INTEGER32) {
         if (!parse_serial_number(input, integer) || (definition->type == ParameterType::NATURAL32 && integer < 0)) {
-            responses.append("ERROR: Invalid value\n\r");
+            responses.append("%.*s ERROR: Invalid value\r\n", static_cast<int>(param.size()), param.data());
             return false;
         }
         if (definition->type == ParameterType::INTEGER32) value = static_cast<int32_t>(integer);
@@ -389,26 +379,26 @@ bool VBDriveConfig::set(std::string_view param, std::string_view input, UARTResp
         value = input;
     }
     else {
-        responses.append("ERROR: Invalid value\n\r");
+        responses.append("%.*s ERROR: Invalid value\r\n", static_cast<int>(param.size()), param.data());
         return false;
     }
 
     if (write_persistent_parameter(*this, definition->id, value, apply_runtime) != ParameterWriteResult::OK) {
-        responses.append("ERROR: Invalid value\n\r");
+        responses.append("%.*s ERROR: Invalid value\r\n", static_cast<int>(param.size()), param.data());
         return false;
     }
     if (definition->type == ParameterType::REAL32) {
-        responses.append("OK: %s:%f\n\r", definition->name.data(), std::get<float>(value));
+        responses.append("%s:%f OK\r\n", definition->name.data(), std::get<float>(value));
     }
     else if (definition->type == ParameterType::INTEGER32) {
-        responses.append("OK: %s:%ld\n\r", definition->name.data(), std::get<int32_t>(value));
+        responses.append("%s:%ld OK\r\n", definition->name.data(), std::get<int32_t>(value));
     }
     else if (definition->type == ParameterType::STRING) {
-        responses.append("OK: %s:%.*s\n\r", definition->name.data(),
+        responses.append("%s:%.*s OK\r\n", definition->name.data(),
                          static_cast<int>(input.size()), input.data());
     }
     else {
-        responses.append("OK: %s:%lu\n\r", definition->name.data(), std::get<uint32_t>(value));
+        responses.append("%s:%lu OK\r\n", definition->name.data(), std::get<uint32_t>(value));
     }
     return true;
 }

@@ -229,22 +229,29 @@ bool is_able_to_calibrate() {
     );
 }
 
+static void report_calibration_progress(int done, int total) {
+    get_app_manager().send_message("CALIBRATE %d/%d DONE\r\n", done, total);
+}
+
 bool do_calibrate() {
-    // Stop all control
+    // Stop all control and enable the bridge for the calibration motion.
     motor->set_foc_point(FOCTarget{0});
+    const bool was_on = motor->is_on();
+    if (!was_on && motor->set_state(true) != HAL_OK) return false;
     auto& app_manager = get_app_manager();
     app_manager.set_state(CommandState::CALIBRATING);
     discard_serial_input();
 
     calibration_data.reset();
     // NOTE: see app.h lines 20-21 for details on cyphal_queue_buffer_shared
-    motor->calibrate(calibration_data, cyphal_queue_buffer_shared, SHARED_BUFFER_SIZE);
+    motor->calibrate(calibration_data, cyphal_queue_buffer_shared, SHARED_BUFFER_SIZE, report_calibration_progress);
     calibration_data.was_calibrated = true;
     HAL_IMPORTANT(eeprom.write<CalibrationData>(&calibration_data, CALIBRATION_PLACEMENT))
     motor->apply_calibration(calibration_data);
 
+    const bool stopped = was_on || motor->set_state(false) == HAL_OK;
     app_manager.set_state(CommandState::RUNNING);
-    return true;
+    return stopped;
 }
 
 void apply_calibration() {

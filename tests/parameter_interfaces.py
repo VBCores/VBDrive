@@ -157,7 +157,17 @@ int main() {
     }
     manager.set_state(CommandState::RUNNING);
     assert(command("firmware_rev:?\r\n").find("0123456789abcdef")!=std::string::npos);
-    assert(command("name:?").find("name:M4310")==0);
+    assert(command("name:?").find("name:vbdrive")==0);
+    uart_frames.clear();
+    assert(command("CALIBRATE")=="CALIBRATE FINISH\r\n");
+    assert(uart_frames.size()==2 && uart_frames[0]=="CALIBRATE OK\r\n" &&
+           uart_frames[1]=="CALIBRATE FINISH\r\n");
+    assert(calibrations==1);
+    manager.set_state(CommandState::CONFIG);
+    assert(command("CALIBRATE")=="CALIBRATE ERROR: conditions not met\r\n");
+    manager.set_state(CommandState::RUNNING);
+    assert(command("log_on")=="log_on OK\r\n");
+    assert(command("log_off")=="log_off OK\r\n");
     assert(command("vbdrive_model:?").find("Unknown parameter")!=std::string::npos);
     for (size_t i=0; i<PARAMETER_CATALOG.size();++i) {
         const auto& d=PARAMETER_CATALOG[i];
@@ -186,13 +196,16 @@ int main() {
     command("CONFIG"); command("kp:8"); command("CONFIG");
     assert(config.kp==8); command("kp:bad"); command("EXIT");
     assert(std::isnan(config.kp) && eeprom.writes==0 && manager.is_app_running());
-    command("CONFIG"); command("RESET"); command("EXIT"); assert(config.node_id==11);
+    assert(command("CONFIG")=="CONFIG OK: mode enabled\r\n");
+    assert(command("RESET").starts_with("RESET OK:"));
+    assert(command("EXIT").starts_with("EXIT OK:")); assert(config.node_id==11);
     for (const auto& d:PARAMETER_CATALOG) {
         if (!d.is_persistent) continue;
         ParameterValue before; assert(read_parameter(config,d.id,before));
         command("CONFIG");
         const auto input=d.type==ParameterType::INTEGER32 ? "-1" : "1";
-        assert(command(std::string(d.name)+":"+input).find("OK:")==0);
+        const auto reply=command(std::string(d.name)+":"+input);
+        assert(reply.starts_with(std::string(d.name)+":") && reply.ends_with(" OK\r\n"));
         command("EXIT");
         ParameterValue after; assert(read_parameter(config,d.id,after));
         if (d.type==ParameterType::REAL32 && std::isnan(std::get<float>(before))) assert(std::isnan(std::get<float>(after)));
@@ -202,12 +215,12 @@ int main() {
     assert(eeprom.writes==1 && config.kp==9);
     assert(command("name:axis-01").find("CONFIG mode required")!=std::string::npos);
     command("CONFIG");
-    assert(command("name:left drive").find("OK: name:left drive")==0);
+    assert(command("name:left drive").starts_with("name:left drive OK"));
     assert(command("name:?").find("name:left drive")==0);
     assert(command("name:").find("Invalid value")!=std::string::npos);
     assert(command("name:0123456789abcdef").find("Invalid value")!=std::string::npos);
-    assert(command("name:123456789012345").find("OK: name:123456789012345")==0);
-    command("EXIT"); assert(command("name:?").find("name:M4310")==0);
+    assert(command("name:123456789012345").starts_with("name:123456789012345 OK"));
+    command("EXIT"); assert(command("name:?").find("name:vbdrive")==0);
     command("CONFIG"); command("ang_dir:-1"); assert(config.angle_direction==-1);
     assert(command("ang_dir:0").find("Invalid")!=std::string::npos);
     assert(command("gear:0").find("Invalid")!=std::string::npos);
@@ -250,7 +263,7 @@ int main() {
     assert(write_persistent_parameter(config,ParameterId::NAME,std::string_view("bad\nname"),false)==ParameterWriteResult::INVALID);
     fill_register_integer32(input,0); access("is_on",input); assert(!device.on);
     motor=nullptr; fill_register_natural32(input,13); access("node_id",input); assert(config.node_id==13);
-    assert(command("STOP").find("OK: STOP")==0);
+    assert(command("STOP")=="STOP OK\r\n");
     assert(access("encoder_rotor",{})._tag_==REGISTER_EMPTY_TAG); motor=&device;
     for (auto state : {CommandState::INIT, CommandState::RUNNING, CommandState::CONFIG, CommandState::NOT_CALIBRATED}) {
         manager.set_state(state);
@@ -258,9 +271,9 @@ int main() {
             assert(command(std::string(d.name)+":?").find(std::string(d.name)+":")==0);
             if (!d.is_mutable) assert(command(std::string(d.name)+":1").find("Read-only")!=std::string::npos);
         }
-        assert(command("bootloader:0").find("OK:")==0);
+        assert(command("bootloader:0")=="bootloader:0 OK\r\n");
         assert(!bootloader_reboot_pending);
-        assert(command("STOP").find("OK: STOP")==0);
+        assert(command("STOP")=="STOP OK\r\n");
         assert(device.servo_type==3 && device.servo_value==0);
         assert(manager.get_state()==state);
     }
@@ -313,7 +326,7 @@ int main() {
     assert(loaded.servo_pos_p_gain==1 && loaded.servo_pos_i_gain==7);
     command("EXIT");
     assert(config.servo_pos_p_gain==1 && config.servo_pos_i_gain==7);
-    command("CONFIG"); command("servo_pos_d_gain:0.75"); command("APPLY");
+    command("CONFIG"); command("servo_pos_d_gain:0.75"); assert(command("APPLY")=="APPLY OK\r\n");
     eeprom.read(&loaded,0); assert(loaded.servo_pos_d_gain==.75f);
     assert(device.position.kd==.5f); // APPLY reloads on the actual reset, not before it.
     loaded.apply_servo_config(); assert(device.position.kd==.75f);
@@ -330,10 +343,10 @@ int main() {
     device.valid_target=true; command("STOP");
     // Exact motion grammar, common dispatch, and transport-independent errors.
     for (int type=0; type<4; ++type) {
-        assert(command("servo_cmd: "+std::to_string(type)+" -0.25").find("OK:")==0);
+        assert(command("servo_cmd: "+std::to_string(type)+" -0.25")=="servo_cmd OK\r\n");
         assert(device.servo_type==type && device.servo_value==-.25f);
     }
-    assert(command("mit_cmd:\t1 2 3 4 5").find("OK:")==0);
+    assert(command("mit_cmd:\t1 2 3 4 5")=="mit_cmd OK\r\n");
     assert(device.target.angle==1 && device.target.velocity==2 && device.target.torque==3);
     assert(device.target.angle_kp==4 && device.target.velocity_kp==5);
     for (auto bad : {"mit_cmd: 1 2 3 4", "mit_cmd: 1 2 3 4 5 6", "mit_cmd: 1 2 3 bad 5",
@@ -367,18 +380,18 @@ int main() {
     uart_frames.clear();
     receive_serial("servo_cmd: 0 "); drain_serial(); assert(uart_frames.empty());
     receive_serial("0.125\r\nSTOP\nfirmware_rev:?\r"); drain_serial();
-    assert(uart_frames.size()==3 && uart_frames[0].find("OK: servo_cmd")==0);
-    assert(uart_frames[1].find("OK: STOP")==0 && uart_frames[2].find("firmware_rev:")==0);
+    assert(uart_frames.size()==3 && uart_frames[0]=="servo_cmd OK\r\n");
+    assert(uart_frames[1]=="STOP OK\r\n" && uart_frames[2].find("firmware_rev:")==0);
     uart_frames.clear();
     const std::string long_command="mit_cmd: 0.000000000000000000 0.000000000000000000 0 0 0\n";
     for (char byte : long_command) {receive_serial(std::string_view(&byte,1)); drain_serial();}
-    assert(uart_frames.size()==1 && uart_frames[0].find("OK: mit_cmd")==0);
+    assert(uart_frames.size()==1 && uart_frames[0]=="mit_cmd OK\r\n");
     uart_frames.clear();
     receive_serial(std::string(220,'x')+"\nSTOP\n"); drain_serial();
-    assert(uart_frames.size()==2 && uart_frames[0].find("ERROR:")==0 && uart_frames[1].find("OK: STOP")==0);
+    assert(uart_frames.size()==2 && uart_frames[0].find("SERIAL ERROR:")==0 && uart_frames[1]=="STOP OK\r\n");
     uart_frames.clear();
     receive_serial(std::string(600,'x')+"\nSTOP\n"); drain_serial();
-    assert(uart_frames.size()==2 && uart_frames[0].find("overflow")!=std::string::npos && uart_frames[1].find("OK: STOP")==0);
+    assert(uart_frames.size()==2 && uart_frames[0].find("SERIAL ERROR:")==0 && uart_frames[1]=="STOP OK\r\n");
     // One bounded command per service, no consumption while TX owns the buffer.
     uart_frames.clear();
     receive_serial("STOP\nfirmware_rev:?\n");
@@ -403,8 +416,10 @@ int main() {
     assert(serial_deferred && resets==resets_before);
     process_serial(); assert(!serial_deferred && resets==resets_before+1 && !device.on);
     receive_serial("CALIBRATE\n"); serial_service();
-    assert(serial_deferred && calibrations==0);
-    process_serial(); assert(!serial_deferred && calibrations==1);
+    assert(serial_deferred && calibrations==1);
+    uart_frames.clear();
+    process_serial(); assert(!serial_deferred && calibrations==2 && uart_output=="CALIBRATE FINISH\r\n");
+    assert(uart_frames.size()==2 && uart_frames[0]=="CALIBRATE OK\r\n");
     receive_serial("is_on:1\n"); serial_service();
     assert(serial_deferred && !device.on);
     process_serial(); assert(!serial_deferred && device.on);
@@ -469,7 +484,7 @@ with tempfile.TemporaryDirectory(prefix="vbdrive-interfaces-") as temp:
         dest.write_text('#include "stub.hpp"\n')
     (tmp / "stub.hpp").write_text(STUB)
     sm = (ROOT / "App/state_manager.cpp").read_text()
-    parsers = sm[sm.index("static constexpr size_t PARSED_VALUE_MAX_SIZE"):sm.index("constexpr auto make_action")]
+    parsers = sm[sm.index("static constexpr size_t PARSED_VALUE_MAX_SIZE"):sm.index("DriveStateController drive_state_controller(")]
     config_methods = sm[sm.index("bool VBDriveConfig::are_required_params_set"):]
     app = (ROOT / "App/app.cpp").read_text()
     deferred = app[app.index("static void persist_pending_config_if_needed() {"):app.index("void in_loop_reporting")]
@@ -484,9 +499,11 @@ VBDrive* get_motor(){return motor;}
 EEPROM eeprom; EEPROM& get_eeprom(){return eeprom;}
 UART_HandleTypeDef uart;
 DriveStateController manager(&uart,eeprom,[]{device.on=true;},[]{device.on=false;},
-    {{"CALIBRATE", {[]{return true;}, []{++calibrations; return true;}}}});
+    {});
 UART_HandleTypeDef& huart2=uart;
-bool is_able_to_calibrate() {return true;}
+bool is_able_to_calibrate() {return manager.get_state()==CommandState::RUNNING ||
+                                  manager.get_state()==CommandState::NOT_CALIBRATED;}
+bool do_calibrate() {++calibrations; return true;}
 DriveStateController& get_app_manager(){return manager;}
 void reboot_to_bootloader(){++boots;}
 bool config_save_pending=false;

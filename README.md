@@ -167,7 +167,7 @@ The board uses a UART-based serial interface for configuration, calibration, mot
 
 * **Write parameter**:
   `<parameter_name>:<value>`
-  Example: `kp:0.35` -> `OK: kp:0.350000`
+  Example: `kp:0.35` -> `kp:0.350000 OK`
 
 ---
 
@@ -206,7 +206,12 @@ not cancel an accepted request. The bool register is identical in Cyphal.
 Calibration is an isolated blocking procedure: no commands, including STOP,
 queries or bootloader requests, are processed until it finishes. Serial input
 received during calibration is discarded, not executed afterwards. Wait for
-completion before sending another command. Calibration cannot be cancelled.
+`CALIBRATE OK` acknowledges acceptance. `CALIBRATE 1/10 DONE` through
+`CALIBRATE 10/10 DONE` are emitted after the ten movement stages;
+`CALIBRATE FINISH` follows successful EEPROM save and
+application of the result. Wait for FINISH before sending another command.
+Calibration cannot be cancelled. If the driver is off, CALIBRATE enables it
+for the calibration motion and disables it again after completion.
 
 Logging is disabled when leaving RUNNING and does not restart automatically.
 Its format uses the position, velocity and torque fields of `voltbro.foc.State`,
@@ -216,8 +221,9 @@ in rad, rad/s and N m, without timestamp:
 state: 0.000000 0.000000 0.000000
 ```
 
-Replies include `OK: mit_cmd`, `OK: servo_cmd`, `OK: STOP`, and
-`OK: <register>:<value>`; errors begin with `ERROR:`.
+Status replies start with the command or register, then the status: `mit_cmd OK`,
+`servo_cmd OK`, `STOP OK`, `<register>:<value> OK`, or `<command> ERROR: reason`.
+Read replies remain `<register>:<value>`.
 All Serial exchanges use the same shared register catalog.
 
 ```text

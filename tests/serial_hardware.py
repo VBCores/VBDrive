@@ -76,7 +76,7 @@ try:
     assert 'OK' in command('is_on:1')
     assert read('is_on') == '1'
 
-    assert 'ENABLED' in command('CONFIG'); in_config = True
+    assert 'CONFIG OK: mode enabled' in command('CONFIG'); in_config = True
     for name, kind, _, persistent in schema:
         if persistent == 'true':
             value = '-1' if kind == 'INTEGER32' else '1'
@@ -85,26 +85,26 @@ try:
                 assert read(name) == value
             else:
                 assert float(read(name)) == float(value)
-    assert 'ENABLED' in command('CONFIG')
+    assert 'CONFIG OK: mode enabled' in command('CONFIG')
     assert float(read('gear')) == 1
     assert 'Invalid value' in command('gear:256')
     assert 'Invalid value' in command('kp:bad')
     assert 'Invalid value' in command('ang_dir:0')
     assert 'Read-only' in command('firmware_rev:bad')
     assert read('firmware_rev') == args.revision
-    assert 'DISCARDED' in command('EXIT'); in_config = False
+    assert 'EXIT OK: changes discarded' in command('EXIT'); in_config = False
     for name, _, _, persistent in schema:
         if persistent == 'true': assert same(read(name), original[name])
     command('CONFIG'); in_config = True
     assert 'default' in command('RESET')
-    assert 'DISCARDED' in command('EXIT'); in_config = False
+    assert 'EXIT OK: changes discarded' in command('EXIT'); in_config = False
     assert read('gear') == original['gear'] and read('node_id') == original['node_id']
 
     # Exercise actual EEPROM SAVE + reboot without changing the user's value.
     command('CONFIG'); in_config = True
     assert 'OK' in command('gear:'+original['gear'])
     assert 'Invalid value' in command('gear:bad')
-    assert 'Saved config' in command('SAVE'); in_config = False
+    assert command('SAVE').startswith('SAVE OK:'); in_config = False
     command('APPLY', 3)
     assert read('firmware_rev') == args.revision
     for name, _, _, persistent in schema:
@@ -118,11 +118,11 @@ try:
     reply = command('firmware_rev:?', .4)
     assert re.search(r'state: -?\d+\.\d{6} -?\d+\.\d{6} -?\d+\.\d{6}', reply), reply
     command('log_off')
-    assert 'OK: STOP' in command('STOP')
+    assert 'STOP OK' in command('STOP')
     assert read('is_on') == '1'  # STOP is zero voltage, not disable.
     command('log_on'); command('CONFIG'); in_config = True
     assert 'RUNNING mode required' in command('log_on')
-    assert 'OK: STOP' in command('STOP')
+    assert 'STOP OK' in command('STOP')
     command('EXIT'); in_config = False
     assert 'state:' not in command('firmware_rev:?', .4)
     assert 'OK' in command('is_on:0')

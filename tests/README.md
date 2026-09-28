@@ -329,3 +329,10 @@ Known upstream verification failures, not hidden by the port:
 
 Recovery points are the branch `codex/vbdrive-before-main-sync-20260908` and the
 stash named `VBDrive new parameters before main sync 2026-09-08`.
+
+## Serial statuses and calibration progress, 2026-09-28
+
+Host interface tests verify command-first status replies, including CALIBRATE OK, CALIBRATE FINISH, and the rejected calibration response.
+The Release image was flashed and verified on VBDrive 01. A first calibration from is_on=0 stalled at return-to-zero because the bridge was disabled; it was stopped by an addressed MCU reset and the drive was disabled.
+The fixed code enables the bridge for calibration and restores its previous enable state. A second run from is_on=0 delivered all ten numbered DONE messages and FINISH in order (131.499 s). Final Serial readback showed is_on=0, name=M4310, node_id=1 and bus_voltage=24.479296 V.
+Calibration RAM header after completion was 00000001 FFFFFFC0 89ABCDEF. Logs: var/serial-calibration-*-20260928.json*.
