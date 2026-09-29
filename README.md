@@ -279,7 +279,7 @@ with new firmware; new clients with old firmware are not supported.
 
 | Port ID | Message Type                              | Interval | Description                                   |
 | ------- | ----------------------------------------- | -------- | --------------------------------------------- |
-| `3811`  | `voltbro.foc.State.1.0`               | 1 ms     | Timestamp, position, velocity, torque        |
+| `3811`  | `voltbro.foc.State.1.0`                   | 1 ms     | Timestamp, position, velocity, torque         |
 
 ---
 
