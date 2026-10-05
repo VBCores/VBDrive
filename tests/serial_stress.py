@@ -75,11 +75,11 @@ try:
         command('is_on:1', 'is_on:1 OK')
     command('log_on', 'log_on OK')
     modes = ['servo_cmd: 0 0', 'servo_cmd: 0 0.05', 'servo_cmd: 0 -0.05',
-             'mit_cmd: 0 0.05 0 0 2', 'position_step', 'servo_cmd: 3 0', 'servo_cmd: 1 0']
+             'mit_cmd: 0 0.05 0 0 2', 'position_step', 'servo_cmd: 6 0', 'servo_cmd: 2 0']
     for mode in modes:
         if mode == 'position_step':
             assert report['states']
-            mode = f"servo_cmd: 2 {report['states'][-1][1] + .03:.6f}"
+            mode = f"servo_cmd: 3 {report['states'][-1][1] + .03:.6f}"
         if args.motion:
             command(mode, mode.split(':')[0] + ' OK')
         phase_start = time.monotonic()

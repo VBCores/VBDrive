@@ -1,39 +1,48 @@
-//#pragma region Includes
-#include "app.h"
+#define NANOPRINTF_IMPLEMENTATION
+#define NANOPRINTF_USE_FIELD_WIDTH_FORMAT_SPECIFIERS 1
+#define NANOPRINTF_USE_PRECISION_FORMAT_SPECIFIERS   1
+#define NANOPRINTF_USE_FLOAT_FORMAT_SPECIFIERS       1 // float
+#define NANOPRINTF_USE_LARGE_FORMAT_SPECIFIERS       1 // 'l' (long), 'll' (long long)
+#define NANOPRINTF_USE_SMALL_FORMAT_SPECIFIERS       1 // 'hh' (char), 'h' (short)
+#define NANOPRINTF_USE_BINARY_FORMAT_SPECIFIERS      0 // %b (binary)
+#define NANOPRINTF_USE_WRITEBACK_FORMAT_SPECIFIERS   0 // %n
+#include "nanoprintf.h"
 
+#include "app.h"
+#include "config/config.hpp"
+#include "state_manager/state_manager.h"
+#include "profiling.hpp"
+#include "communications/serial/setup.hpp"
+#include "communications/cyphal/setup.hpp"
+#include "communications/cyphal/interface.hpp"
 #include <memory>
 #include <type_traits>
-
 #include "tim.h"
 #include "i2c.h"
 #include "adc.h"
-
 #include "spi.h"
 #include "cordic.h"
-
 #include <voltbro/devices/stspin32g4.hpp>
-#include <cyphal/node/node_info_handler.h>
-#include <cyphal/node/registers_handler.hpp>
-#include <cyphal/node/registers_utils.hpp>
-#include <cyphal/providers/G4CAN.h>
-
-#include <uavcan/node/Mode_1_0.hpp>
-#include <uavcan/primitive/Empty_1_0.hpp>
-#include <uavcan/primitive/array/Real32_1_0.hpp>
-#include <uavcan/primitive/scalar/Real32_1_0.hpp>
-#include <uavcan/si/unit/angular_velocity/Scalar_1_0.hpp>
-#include <uavcan/si/unit/angle/Scalar_1_0.hpp>
-#include <uavcan/si/unit/torque/Scalar_1_0.hpp>
-#include <uavcan/si/unit/voltage/Scalar_1_0.hpp>
-#include <voltbro/foc/MIT_1_0.hpp>
-#include <voltbro/foc/Servo_1_0.hpp>
-#include <voltbro/foc/State_1_0.hpp>
-
 #include <voltbro/eeprom/eeprom.hpp>
 #include <voltbro/encoders/ASxxxx/AS5047P.hpp>
 #include <voltbro/motors/bldc/vbdrive/vbdrive.hpp>
 #include <voltbro/utils.hpp>
-//#pragma endregion
+#include "stm32g4xx_hal_tim.h"
+
+#ifndef NDEBUG
+// Keep failed preconditions inspectable without newlib's allocating stdio path.
+const char* volatile assertion_file = nullptr;
+const char* volatile assertion_expression = nullptr;
+volatile int assertion_line = 0;
+extern "C" [[noreturn]] void __assert_func(const char* file, int line, const char*, const char* expression) {
+    assertion_file = file;
+    assertion_line = line;
+    assertion_expression = expression;
+    if (htim1.Instance != nullptr) __HAL_TIM_MOE_DISABLE(&htim1);
+    Error_Handler();
+    for (;;) {}
+}
+#endif
 
 static constexpr uint32_t SETUP_NODE_ID_MAX = CANARD_NODE_ID_MAX - 1U;
 
@@ -53,58 +62,10 @@ static CanardNodeID make_unconfigured_setup_node_id() {
     return static_cast<CanardNodeID>(1U + (hash % SETUP_NODE_ID_MAX));
 }
 
-//#pragma region ExternConfiguration
-#define NANOPRINTF_IMPLEMENTATION
-#define NANOPRINTF_USE_FIELD_WIDTH_FORMAT_SPECIFIERS 1
-#define NANOPRINTF_USE_PRECISION_FORMAT_SPECIFIERS   1
-#define NANOPRINTF_USE_FLOAT_FORMAT_SPECIFIERS       1 // float
-#define NANOPRINTF_USE_LARGE_FORMAT_SPECIFIERS       1 // 'l' (long), 'll' (long long)
-#define NANOPRINTF_USE_SMALL_FORMAT_SPECIFIERS       1 // 'hh' (char), 'h' (short)
-#define NANOPRINTF_USE_BINARY_FORMAT_SPECIFIERS      0 // %b (binary)
-#define NANOPRINTF_USE_WRITEBACK_FORMAT_SPECIFIERS   0 // %n
-#include "nanoprintf.h"
 extern "C" {
-    // During setup we need tiny heap for shared_ptr of CyphalInterface for API compatibility reasons
+    // Setup allocates Cyphal shared ownership; runtime cannot grow the heap.
     bool global_allocation_lock = false;
 }
-//#pragma endregion
-
-#ifdef STACK_PROFILE
-extern uint32_t __StackLimit;
-extern uint32_t __StackTop;
-constexpr uint32_t STACK_CANARY = 0xDEADBEEF;
-volatile static size_t max_stack_usage = 0;
-
-void mark_stack() {
-    uint32_t current_sp;
-    __asm__ volatile ("mov %0, sp" : "=r" (current_sp));
-
-    volatile uint32_t *p = static_cast<volatile uint32_t*>(&__StackLimit);
-    volatile uint32_t *sp = reinterpret_cast<volatile uint32_t*>(current_sp);
-
-    while (p < sp) {
-        *p = STACK_CANARY;
-        p++;
-    }
-}
-
-void measure_stack_usage() {
-    volatile uint32_t *p = static_cast<volatile uint32_t*>(&__StackLimit);
-    volatile uint32_t *top = static_cast<volatile uint32_t*>(&__StackTop);
-
-    while (p < top && *p == STACK_CANARY) {
-        p++;
-    }
-
-    size_t unused = static_cast<size_t>(p - &__StackLimit);
-    size_t total = static_cast<size_t>(&__StackTop - &__StackLimit);
-    size_t used = total - unused;
-
-    if (used > max_stack_usage) {
-        max_stack_usage = used;
-    }
-}
-#endif
 
 void setup_cordic() {
     CORDIC_ConfigTypeDef cordic_config {
@@ -141,43 +102,37 @@ VBDrive* get_motor() {
     return motor;
 }
 
-static int8_t config_angle_direction(const VBDriveConfig& config_data) {
-    if (config_data.angle_direction == -1) {
-        return -1;
-    }
-    return 1;
-}
-
 void create_motor(VBDriveConfig& config_data) {
+    constexpr float voltage_limit = 50.0f;
     motor = new (&motor_storage) VBDrive(
         0.000025f,
         // Kalman filter for determining electric angle
         FiltersConfig {
-            .expected_a = value_or_default(config_data.filter_a, VBDriveDefaults::FILTER_A),
-            .g1 = value_or_default(config_data.filter_g1, VBDriveDefaults::FILTER_G1),
-            .g2 = value_or_default(config_data.filter_g2, VBDriveDefaults::FILTER_G2),
-            .g3 = value_or_default(config_data.filter_g3, VBDriveDefaults::FILTER_G3),
-            .I_lpf_coefficient = value_or_default(config_data.I_lpf_coefficient, VBDriveDefaults::I_LPF)
+            .expected_a = value_or_default(config_data.filter_a, parameter_default<float>(ParameterId::FLT_A)),
+            .g1 = value_or_default(config_data.filter_g1, parameter_default<float>(ParameterId::FLT_G1)),
+            .g2 = value_or_default(config_data.filter_g2, parameter_default<float>(ParameterId::FLT_G2)),
+            .g3 = value_or_default(config_data.filter_g3, parameter_default<float>(ParameterId::FLT_G3)),
+            .I_lpf_coefficient = value_or_default(config_data.I_lpf_coefficient, parameter_default<float>(ParameterId::I_LPF))
         },
         // Q Regulator
         PIDConfig {
             .multiplier = 1.0f,
-            .kp = value_or_default(config_data.kp, VBDriveDefaults::PID_KP),
-            .ki = value_or_default(config_data.ki, VBDriveDefaults::PID_KI),
-            .kd = value_or_default(config_data.kd, VBDriveDefaults::PID_KD),
-            .integral_error_lim = VBDriveDefaults::MAX_VOLTAGE,
-            .max_output = VBDriveDefaults::MAX_VOLTAGE,
-            .min_output = -VBDriveDefaults::MAX_VOLTAGE,
+            .kp = value_or_default(config_data.kp, parameter_default<float>(ParameterId::KP)),
+            .ki = value_or_default(config_data.ki, parameter_default<float>(ParameterId::KI)),
+            .kd = value_or_default(config_data.kd, parameter_default<float>(ParameterId::KD)),
+            .integral_error_lim = voltage_limit,
+            .max_output = voltage_limit,
+            .min_output = -voltage_limit,
         },
         // D Regulator
         PIDConfig {
             .multiplier = 1.0f,
-            .kp = value_or_default(config_data.kp, VBDriveDefaults::PID_KP),
-            .ki = value_or_default(config_data.ki, VBDriveDefaults::PID_KI),
-            .kd = value_or_default(config_data.kd, VBDriveDefaults::PID_KD),
-            .integral_error_lim = VBDriveDefaults::MAX_VOLTAGE,
-            .max_output = VBDriveDefaults::MAX_VOLTAGE,
-            .min_output = -VBDriveDefaults::MAX_VOLTAGE,
+            .kp = value_or_default(config_data.kp, parameter_default<float>(ParameterId::KP)),
+            .ki = value_or_default(config_data.ki, parameter_default<float>(ParameterId::KI)),
+            .kd = value_or_default(config_data.kd, parameter_default<float>(ParameterId::KD)),
+            .integral_error_lim = voltage_limit,
+            .max_output = voltage_limit,
+            .min_output = -voltage_limit,
         },
         // User-defined runtime config
         DriveRuntimeConfig {
@@ -186,12 +141,12 @@ void create_motor(VBDriveConfig& config_data) {
             .user_speed_limit = value_or_default(config_data.max_speed, NAN),
             .user_position_lower_limit = value_or_default(config_data.min_angle, NAN),
             .user_position_upper_limit = value_or_default(config_data.max_angle, NAN),
-            .user_angle_offset = value_or_default(config_data.angle_offset, VBDriveDefaults::ANGLE_OFFSET),
-            .user_angle_direction = config_angle_direction(config_data)
+            .user_angle_offset = value_or_default(config_data.angle_offset, parameter_default<float>(ParameterId::ANG_OFF)),
+            .user_angle_direction = config_data.angle_direction == -1 ? int8_t(-1) : int8_t(1)
         },
         // Built-in constant parameters
         DriveInfo {
-            .torque_const = value_or_default(config_data.torque_const, VBDriveDefaults::TORQUE_CONST),
+            .torque_const = value_or_default(config_data.torque_const, parameter_default<float>(ParameterId::KT)),
             .max_current = 30.0,
             .max_torque = 30.0f,
             .stall_current = 6.0f,
@@ -203,7 +158,7 @@ void create_motor(VBDriveConfig& config_data) {
                 .ppairs = 14,
                 .gear_ratio = value_or_default(
                     config_data.gear_ratio,
-                    VBDriveDefaults::GEAR_RATIO,
+                    static_cast<uint8_t>(parameter_default<uint32_t>(ParameterId::GEAR)),
                     static_cast<uint8_t>(0)
                 )
             }
@@ -230,11 +185,12 @@ bool is_able_to_calibrate() {
 }
 
 static void report_calibration_progress(int done, int total) {
-    get_app_manager().send_message("CALIBRATE %d/%d DONE\r\n", done, total);
+    serial_send_message("CALIBRATE %d/%d DONE\r\n", done, total);
 }
 
 bool do_calibrate() {
     // Stop all control and enable the bridge for the calibration motion.
+    motor->reset_servo_input();
     motor->set_foc_point(FOCTarget{0});
     const bool was_on = motor->is_on();
     if (!was_on && motor->set_state(true) != HAL_OK) return false;
@@ -242,8 +198,8 @@ bool do_calibrate() {
     app_manager.set_state(CommandState::CALIBRATING);
     discard_serial_input();
 
+    pause_cyphal_for_calibration();
     calibration_data.reset();
-    // NOTE: see app.h lines 20-21 for details on cyphal_queue_buffer_shared
     motor->calibrate(calibration_data, cyphal_queue_buffer_shared, SHARED_BUFFER_SIZE, report_calibration_progress);
     calibration_data.was_calibrated = true;
     HAL_IMPORTANT(eeprom.write<CalibrationData>(&calibration_data, CALIBRATION_PLACEMENT))
@@ -251,6 +207,7 @@ bool do_calibrate() {
 
     const bool stopped = was_on || motor->set_state(false) == HAL_OK;
     app_manager.set_state(CommandState::RUNNING);
+    resume_cyphal_after_calibration();
     return stopped;
 }
 
@@ -261,20 +218,15 @@ void apply_calibration() {
     if (calibration_data.type_id != CalibrationData::TYPE_ID || !calibration_data.was_calibrated) {
         auto& app_manager = get_app_manager();
         char warning_message[] = "Motor is not calibrated! Movement forbidden\n\r\0";
-        app_manager.send_message(warning_message);
+        serial_send_message(warning_message);
         app_manager.set_state(CommandState::NOT_CALIBRATED);
         return;
     }
     motor->apply_calibration(calibration_data);
 }
 
-static void persist_pending_config_if_needed();
-
 void app() {
-#ifdef STACK_PROFILE
-    mark_stack();
-#endif
-//#pragma region StartupConfiguration
+    profile_mark_stack();
     start_timers();
     eeprom.wait_until_available();
     auto& app_manager = get_app_manager();
@@ -282,21 +234,21 @@ void app() {
     start_uart_recv_it();
     auto& config_data = app_manager.get_config();
     if (!app_manager.is_app_running() && config_data.are_required_params_set()) {
-        config_data.was_configured = true;
+        config_data.base.was_configured = true;
         app_manager.set_state(CommandState::RUNNING);
     }
 
     if (!app_manager.is_app_running()) {
         // Bring up Cyphal even with blank EEPROM so config can be restored over CAN.
-        if (config_data.node_id == 0) {
-            config_data.node_id = make_unconfigured_setup_node_id();
+        if (config_data.base.node_id == 0) {
+            config_data.base.node_id = make_unconfigured_setup_node_id();
         }
         start_cyphal();
         set_cyphal_mode(uavcan_node_Mode_1_0_MAINTENANCE);
         while (true) {
             process_serial();
             cyphal_loop();
-            persist_pending_config_if_needed();
+            get_app_manager().persist_pending_config();
             reboot_to_bootloader_if_requested();
             if (app_manager.is_app_running()) {
                 HAL_NVIC_SystemReset();
@@ -305,7 +257,7 @@ void app() {
     }
 
     setup_cordic();
-    create_motor(config_data);
+    create_motor(config_data.app);
     motor->start();
     apply_calibration();
     motor->set_foc_point(FOCTarget{0});
@@ -320,282 +272,104 @@ void app() {
 
     // Lock heap, no dynamic memory is used at runtime
     global_allocation_lock = true;
-//#pragma endregion
 
     HAL_TIM_Base_Start_IT(&htim4);
 
-    #ifdef STACK_PROFILE
-    static millis stack_measurement_time = 0;
-    #endif
-
     while(true) {
+        if (app_manager.is_app_running()) cyphal_loop();
         process_serial();
-        if (app_manager.is_app_running()) {
-            cyphal_loop();
-            persist_pending_config_if_needed();
-        }
+        if (app_manager.is_app_running()) get_app_manager().persist_pending_config();
         reboot_to_bootloader_if_requested();
 
         millis current_time = millis_32();
         monitor_loop(current_time);
-        #ifdef STACK_PROFILE
-        EACH_N(current_time, stack_measurement_time, 100, {
-            measure_stack_usage();
-        })
-        #endif
 
     }
 }
 
-#ifndef NO_CYPHAL
-//#pragma region Cyphal
+#define BOOT_REQUEST_MAGIC 0xB00710ADUL
+void reboot_to_bootloader() {
+    auto motor = get_motor();
 
-static constexpr CanardPortID FOC_COMMAND_PORT = 2107;
-static constexpr CanardPortID FOC_STATE_PORT = 3811;
-static constexpr CanardPortID SERVO_PORT = 3407;
-
-static bool config_save_pending = false;
-
-static void persist_pending_config_if_needed() {
-    if (!config_save_pending) {
-        return;
+    if (motor != nullptr) {
+        motor->set_foc_point(FOCTarget{0});
+        motor->stop();
     }
-    config_save_pending = false;
-    auto& config = get_app_manager().get_committed_config();
-    config.was_configured = config.are_required_params_set();
-    HAL_IMPORTANT(get_eeprom().write<VBDriveConfig>(&config, CONFIG_PLACEMENT))
+
+    (void)HAL_FDCAN_Stop(&hfdcan1);
+
+    __HAL_RCC_PWR_CLK_ENABLE();
+    HAL_PWR_EnableBkUpAccess();
+    TAMP->BKP0R = BOOT_REQUEST_MAGIC;
+    TAMP->BKP1R = 0U;
+    TAMP->BKP2R = 0U;
+    HAL_PWR_DisableBkUpAccess();
+
+    HAL_Delay(50);
+    NVIC_SystemReset();
 }
 
-void reboot_to_bootloader_if_requested() {
-    if (!bootloader_reboot_pending) {
-        return;
+// Volatile is absolutely required here due to timer interrupt
+// Otherwise HAL_Delay() will not work
+static volatile uint32_t millis_k __attribute__ ((__aligned__(4))) = 0;
+
+extern "C" __attribute__((hot)) void main_callback() {
+    auto& app_manager = get_app_manager();
+    const auto sample = profile_main_begin();
+    // Service operations pause motor updates while thread mode changes hardware/config.
+    if (app_manager.is_app_running() && !serial_deferred) {
+        if (auto motor = get_motor()) motor->update();
     }
-    bootloader_reboot_pending = false;
-    reboot_to_bootloader();
+    profile_main_end(sample);
 }
 
-void in_loop_reporting(millis current_t) {
-    if (motor == nullptr) {
-        return;
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+    if (htim->Instance == TIM7) {
+        // <'++'/'+='/... expression of 'volatile'-qualified type is deprecated> - C++20
+        millis_k = millis_k + 1;
+        profile_millisecond();
+    } else if (htim->Instance == TIM2) {
+        HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
     }
+}
 
-    static millis report_time = 0;
-    EACH_N(current_t, report_time, 1, {
-        voltbro_foc_State_1_0 state_msg = {};
+micros __attribute__((optimize("O0"))) micros_64() {
+    return ((micros)millis_32() * 1000u) + __HAL_TIM_GetCounter(&htim7);
+}
 
-        state_msg.timestamp.microsecond = system_time();
+micros system_time() {
+    // TODO: network-wide time sync
+    return micros_64();
+}
 
-        state_msg.pos.radian = motor->get_angle();
-        state_msg.vel.radian_per_second = motor->get_velocity();
-        state_msg._torq.newton_meter = motor->get_torque();
+void start_timers() {
+    profile_start();
+    HAL_TIM_Base_Start_IT(&htim2);
+    HAL_TIM_Base_Start_IT(&htim7);
+}
 
-        // Keep temperature measurements fresh for Serial/Cyphal registers.
-        motor_inverter.update_temperature();
-
-        static CanardTransferID state_transfer_id = 0;
-        get_interface()->send_msg(&state_msg, FOC_STATE_PORT, &state_transfer_id);
+millis millis_32() {
+    if (__HAL_TIM_GET_FLAG(&htim7, TIM_FLAG_UPDATE) == RESET) return millis_k;
+    millis value;
+    // The TIM7 IRQ or a higher-priority poller may consume this tick before entry.
+    CRITICAL_SECTION({
+        if (__HAL_TIM_GET_FLAG(&htim7, TIM_FLAG_UPDATE) != RESET) {
+            __HAL_TIM_CLEAR_FLAG(&htim7, TIM_FLAG_UPDATE);
+            millis_k = millis_k + 1;
+        }
+        value = millis_k;
     })
+    return value;
 }
 
-bool apply_mit_command(FOCTarget target) {
-    auto motor = get_motor();
-    return motor && motor->set_foc_point(std::move(target));
+void HAL_Delay(uint32_t delay) {
+    millis wait_start = millis_32();
+    while ((millis_32() - wait_start) < delay) {}
 }
 
-bool apply_servo_command(uint8_t type, float value) {
-    auto motor = get_motor();
-    if (!motor) return false;
-    switch (type) {
-        case voltbro_foc_Servo_1_0_VELOCITY: return motor->set_velocity_point(value);
-        case voltbro_foc_Servo_1_0_TORQUE: return motor->set_torque_point(value);
-        case voltbro_foc_Servo_1_0_POSITION: return motor->set_angle_point(value);
-        case voltbro_foc_Servo_1_0_VOLTAGE: return motor->set_voltage_point(value);
-        default: return false;
-    }
-}
+static_assert(CALIBRATION_PLACEMENT + sizeof(CalibrationData) <= IND_SENSOR_STATE_PLACEMENT);
 
-class FOCCommandSub: public AbstractSubscription<voltbro_foc_MIT_1_0> {
-public:
-    FOCCommandSub(InterfacePtr interface, CanardPortID port_id): AbstractSubscription<voltbro_foc_MIT_1_0>(interface, port_id) {};
-    void handler(const voltbro_foc_MIT_1_0& msg, CanardRxTransfer*) override {
-        bool is_valid = apply_mit_command(FOCTarget {
-            .torque = msg._torq.newton_meter,
-            .angle = msg.pos.radian,
-            .velocity = msg.vel.radian_per_second,
-            .angle_kp = msg.pos_gain.value,
-            .velocity_kp = msg.vel_gain.value
-        });
-        if (!is_valid) {
-            record_invalid_command();
-        }
-    }
-};
-
-class ServoSub: public AbstractSubscription<voltbro_foc_Servo_1_0> {
-public:
-    ServoSub(InterfacePtr interface, CanardPortID port_id): AbstractSubscription<voltbro_foc_Servo_1_0>(interface, port_id) {};
-    #pragma GCC diagnostic push
-    #pragma GCC diagnostic ignored "-Wunused-parameter"
-    // NOTE: transfer parameter required by the interface, but not used in this implementation
-    void handler(const voltbro_foc_Servo_1_0& msg, CanardRxTransfer* _) override {
-    #pragma GCC diagnostic pop
-        const bool is_valid = apply_servo_command(msg.set_point_type, msg.set_point_value);
-        if (!is_valid) {
-            record_invalid_command();
-        }
-    }
-};
-
-// NOTE: underlying CanardRxSubscriptions are HUGE - 552 bytes each. C++ wrapper size is negligible in comparison
-ReservedObject<NodeInfoReader> node_info_reader;
-ReservedObject<RegistersHandler<PARAMETER_CATALOG.size(), StaticRegisters<PARAMETER_CATALOG.size()>>> registers_handler;
-ReservedObject<FOCCommandSub> foc_command_sub;
-ReservedObject<ServoSub> servo_sub;
-
-static void handle_parameter_register(
-    size_t index,
-    const uavcan_register_Value_1_0& v_in,
-    uavcan_register_Value_1_0& v_out,
-    RegisterAccessResponse& response
-) {
-    const auto& definition = PARAMETER_CATALOG[index];
-    response.persistent = definition.is_persistent;
-    response._mutable = definition.is_mutable;
-
-    if (definition.is_mutable && v_in._tag_ != REGISTER_EMPTY_TAG) {
-        ParameterValue requested{};
-        bool parsed = false;
-        switch (definition.type) {
-            case ParameterType::REAL32:
-                parsed = parse_register_real32(v_in, requested.emplace<float>());
-                break;
-            case ParameterType::NATURAL32:
-                parsed = parse_register_natural32(v_in, requested.emplace<uint32_t>());
-                if (!parsed) {
-                    int32_t signed_value = 0;
-                    parsed = parse_register_integer32(v_in, signed_value) && signed_value >= 0;
-                    if (parsed) requested = static_cast<uint32_t>(signed_value);
-                }
-                break;
-            case ParameterType::INTEGER32:
-                parsed = parse_register_integer32(v_in, requested.emplace<int32_t>());
-                break;
-            case ParameterType::BIT:
-                parsed = parse_register_bit(v_in, requested.emplace<bool>());
-                if (!parsed) {
-                    int32_t signed_value = 0;
-                    uint32_t unsigned_value = 0;
-                    float real_value = 0;
-                    if (parse_register_integer32(v_in, signed_value)) {
-                        requested = signed_value != 0;
-                        parsed = true;
-                    } else if (parse_register_natural32(v_in, unsigned_value)) {
-                        requested = unsigned_value != 0;
-                        parsed = true;
-                    } else if (parse_register_real32(v_in, real_value)) {
-                        requested = real_value != 0;
-                        parsed = true;
-                    }
-                }
-                break;
-            case ParameterType::STRING:
-                if (v_in._tag_ == REGISTER_STRING_TAG) {
-                    requested = std::string_view(
-                        reinterpret_cast<const char*>(v_in._string.value.elements),
-                        v_in._string.value.count);
-                    parsed = true;
-                }
-                break;
-        }
-        if (parsed) {
-            auto& config = get_app_manager().get_committed_config();
-            const auto write_result = definition.is_persistent
-                ? write_persistent_parameter(config, definition.id, requested, motor != nullptr)
-                : write_runtime_parameter(definition.id, requested);
-            if (write_result == ParameterWriteResult::OK && definition.is_persistent) {
-                config.was_configured = config.are_required_params_set();
-                config_save_pending = true;
-            }
-        }
-    }
-
-    ParameterValue current{};
-    if (!read_parameter(get_app_manager().get_committed_config(), definition.id, current)) {
-        v_out._tag_ = REGISTER_EMPTY_TAG;
-        v_out.empty = {};
-        return;
-    }
-    switch (definition.type) {
-        case ParameterType::REAL32:
-            fill_register_real32(v_out, std::get<float>(current));
-            break;
-        case ParameterType::NATURAL32:
-            fill_register_natural32(v_out, std::get<uint32_t>(current));
-            break;
-        case ParameterType::INTEGER32:
-            fill_register_integer32(v_out, std::get<int32_t>(current));
-            break;
-        case ParameterType::BIT:
-            fill_register_bit(v_out, std::get<bool>(current));
-            break;
-        case ParameterType::STRING:
-            fill_register_string(v_out, std::get<std::string_view>(current));
-            break;
-    }
-}
-
-void setup_subscriptions() {
-    auto cyphal_interface = get_interface();
-
-    HAL_FDCAN_ConfigGlobalFilter(
-        &hfdcan1,
-        FDCAN_REJECT,
-        FDCAN_REJECT,
-        FDCAN_REJECT_REMOTE,
-        FDCAN_REJECT_REMOTE
-    );
-
-    const auto node_id = get_app_manager().get_node_id();
-    registers_handler.create(
-        StaticRegisters<PARAMETER_CATALOG.size()>{PARAMETER_NAMES, handle_parameter_register},
-        cyphal_interface
-    );
-
-    node_info_reader.create(
-        cyphal_interface,
-        "org.voltbro.vbdrive",
-        uavcan_node_Version_1_0{1, 0},
-        uavcan_node_Version_1_0{1, 0},
-        uavcan_node_Version_1_0{1, 0},
-        VBDRIVE_VCS_REVISION_ID
-    );
-
-    servo_sub.create(cyphal_interface, SERVO_PORT + node_id);
-    foc_command_sub.create(cyphal_interface, FOC_COMMAND_PORT + node_id);
-
-    HAL_IMPORTANT(apply_filter(
-        0,
-        &hfdcan1,
-        foc_command_sub->make_filter(node_id)
-    ))
-
-    HAL_IMPORTANT(apply_filter(
-        1,
-        &hfdcan1,
-        registers_handler->make_filter(node_id)
-    ))
-
-    HAL_IMPORTANT(apply_filter(
-        2,
-        &hfdcan1,
-        node_info_reader->make_filter(node_id)
-    ))
-
-    HAL_IMPORTANT(apply_filter(
-        3,
-        &hfdcan1,
-        servo_sub->make_filter(node_id)
-    ))
-}
-//#pragma endregion
-#endif
+static_assert(CONFIG_PLACEMENT + sizeof(DriveConfig) <= CALIBRATION_PLACEMENT ||
+              CONFIG_PLACEMENT >= CALIBRATION_PLACEMENT + sizeof(CalibrationData), "Configuration overlaps calibration");
+static_assert(CONFIG_PLACEMENT + sizeof(DriveConfig) <= IND_SENSOR_STATE_PLACEMENT ||
+              CONFIG_PLACEMENT >= IND_SENSOR_STATE_PLACEMENT + sizeof(InductiveSensor::State), "Configuration overlaps inductive state");

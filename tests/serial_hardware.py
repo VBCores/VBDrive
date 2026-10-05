@@ -23,8 +23,8 @@ parser.add_argument('--revision', required=True)
 parser.add_argument('--output', type=Path, required=True)
 args = parser.parse_args()
 schema = re.findall(r'\{ParameterId::\w+,\s*"([^"]+)",\s*ParameterType::(\w+),\s*(true|false),\s*(true|false)',
-                    (Path(__file__).resolve().parents[1] / 'App/parameters.hpp').read_text())
-assert len(schema) == 40
+                    (Path(__file__).resolve().parents[1] / 'App/config/config.hpp').read_text())
+assert len(schema) == 44
 fd = os.open(args.port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
 tty.setraw(fd)
 attrs = termios.tcgetattr(fd)
@@ -79,7 +79,7 @@ try:
     assert 'CONFIG OK: mode enabled' in command('CONFIG'); in_config = True
     for name, kind, _, persistent in schema:
         if persistent == 'true':
-            value = '-1' if kind == 'INTEGER32' else '1'
+            value = '230400' if name == 'serial_baud' else ('-1' if kind == 'INTEGER32' else '1')
             assert 'OK' in command(name+':'+value)
             if kind == 'STRING':
                 assert read(name) == value

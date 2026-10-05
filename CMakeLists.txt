@@ -22,6 +22,15 @@ if(NOT BOOTLOADER_FDCAN_ID_FORMAT MATCHES "^(standard|extended)$")
 endif()
 option(BOOTLOADER_USE_EEPROM_CONFIG "Load VBBoot CAN node id and rates from VBDrive EEPROM config" ON)
 
+set(VB_CONFIG_ADDRESS "0" CACHE STRING "Configuration byte address in storage")
+if(NOT VB_CONFIG_ADDRESS MATCHES "^(0[xX][0-9a-fA-F]+|[0-9]+)$")
+    message(FATAL_ERROR "VB_CONFIG_ADDRESS must be a non-negative decimal or hexadecimal address")
+endif()
+math(EXPR VB_CONFIG_ADDRESS_VALUE "${VB_CONFIG_ADDRESS}")
+if(VB_CONFIG_ADDRESS_VALUE LESS 0 OR VB_CONFIG_ADDRESS_VALUE GREATER 65508)
+    message(FATAL_ERROR "VB_CONFIG_ADDRESS exceeds the 16-bit EEPROM address range")
+endif()
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 
 enable_language(C ASM)
@@ -100,8 +109,8 @@ target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
     "LINKER:-Map=${CMAKE_PROJECT_NAME}.map"
 )
 
-file(GLOB_RECURSE USER_SOURCES "App/*.cpp")
-file(GLOB_RECURSE LIBVOLTBRO_SOURCES "Drivers/libvoltbro/*.cpp" "Drivers/libvoltbro/*.c")
+file(GLOB_RECURSE USER_SOURCES CONFIGURE_DEPENDS "App/*.cpp")
+file(GLOB_RECURSE LIBVOLTBRO_SOURCES CONFIGURE_DEPENDS "Drivers/libvoltbro/*.cpp" "Drivers/libvoltbro/*.c")
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${USER_SOURCES}
     ${LIBVOLTBRO_SOURCES}
@@ -135,16 +144,24 @@ add_compile_options(
     -mfpu=fpv4-sp-d16  # For Cortex-M4
 )
 
+option(VBDRIVE_COUNTERS_ONLY "Count FOC/commands/State in one-second windows without cycle profiling" OFF)
+option(VBDRIVE_CYPHAL_PROFILE "Measure Cyphal pacing without FOC section timing" OFF)
 option(VBDRIVE_FOC_PROFILE "Measure FOC cycle time, including in Release" OFF)
+if(VBDRIVE_COUNTERS_ONLY AND (VBDRIVE_CYPHAL_PROFILE OR VBDRIVE_FOC_PROFILE OR
+                             CMAKE_BUILD_TYPE MATCHES "^(Debug|RelWithDebInfo)$"))
+    message(FATAL_ERROR "VBDRIVE_COUNTERS_ONLY requires a build without FOC/Cyphal profiling")
+endif()
 target_compile_definitions(${CMAKE_PROJECT_NAME} PUBLIC
+    $<$<BOOL:${VBDRIVE_COUNTERS_ONLY}>:COUNTERS_ONLY>
     $<$<BOOL:${VBDRIVE_FOC_PROFILE}>:FOC_PROFILE>
+    $<$<BOOL:${VBDRIVE_CYPHAL_PROFILE}>:CYPHAL_PROFILE>
     $<$<CONFIG:RelWithDebInfo>: -DMONITOR -DFOC_PROFILE>
     $<$<CONFIG:Debug>: -DMONITOR -DDEBUG -DFOC_PROFILE>
 )
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
     $<$<CONFIG:Release>: -O3 -flto -fno-math-errno -fno-signaling-nans -fomit-frame-pointer>
     $<$<CONFIG:RelWithDebInfo>: -O3 -g2 -flto -fno-math-errno -fno-signaling-nans>
-    $<$<CONFIG:Debug>: -Og -g3>
+    $<$<CONFIG:Debug>: -O3 -g3 -flto -fno-math-errno -fno-signaling-nans>
 )
 
 if (NOT CMAKE_BUILD_TYPE MATCHES Debug)
@@ -153,6 +170,7 @@ endif()
 target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
     $<$<CONFIG:Release>:-flto>
     $<$<CONFIG:RelWithDebInfo>:-flto>
+    $<$<CONFIG:Debug>:-flto>
 )
 
 set(
@@ -190,6 +208,8 @@ ExternalProject_Add(VBBoot_firmware
         -DCMAKE_TOOLCHAIN_FILE=${VBBOOT_SOURCE_DIR}/cmake/gcc-arm-none-eabi.cmake
         -DBOOTLOADER_FDCAN_ID_FORMAT=${BOOTLOADER_FDCAN_ID_FORMAT}
         -DBOOTLOADER_USE_EEPROM_CONFIG=${BOOTLOADER_USE_EEPROM_CONFIG}
+        -DLIBVOLTBRO_DIR=${CMAKE_CURRENT_SOURCE_DIR}/Drivers/libvoltbro
+        -DVB_CONFIG_ADDRESS=${VB_CONFIG_ADDRESS_VALUE}
     BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --clean-first
     INSTALL_COMMAND ""
     BUILD_ALWAYS TRUE
@@ -226,3 +246,5 @@ add_custom_command(
 add_custom_target(${CMAKE_PROJECT_NAME}_full_hex ALL
     DEPENDS ${VBDRIVE_FULL_HEX}
 )
+
+target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE VB_CONFIG_ADDRESS=${VB_CONFIG_ADDRESS_VALUE})

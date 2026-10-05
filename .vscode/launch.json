@@ -14,7 +14,7 @@
             "servertype": "stlink",             //Use stlink setup of cortex-M debug
             "device": "STM32G474RET6",            //MCU used
             "interface": "swd",                 //Interface setup
-            "serialNumber": "",                 //Set ST-Link ID if you use multiple at the same time
+            "serialNumber": "${input:stlinkSerial}", //Choose ST-Link by serial number when several are connected
             "runToEntryPoint": "main",          //Run to main and stop there
             //"svdFile": "STM32H73x.svd",         //SVD file to see reisters
             "v1": false,
@@ -30,6 +30,14 @@
 
             /* If you use external loader, add additional arguments */
             //"serverArgs": ["--extload", "path/to/ext/loader.stldr"],
+        }
+    ],
+    "inputs": [
+        {
+            "id": "stlinkSerial",
+            "type": "promptString",
+            "description": "ST-Link serial number (leave empty if only one is connected)",
+            "default": ""
         }
     ]
 }

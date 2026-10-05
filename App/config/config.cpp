@@ -1,5 +1,7 @@
+#include "main.h"
 #include "app.h"
-#include "parameters.hpp"
+#include "config.hpp"
+#include <voltbro/motors/bldc/vbdrive/vbdrive.hpp>
 #include <cmath>
 
 #ifndef VBDRIVE_FIRMWARE_REV
@@ -21,16 +23,21 @@ void record_invalid_command() {
     invalid_commands_counter += 1;
 }
 
-bool read_parameter(const VBDriveConfig& config, ParameterId id, ParameterValue& value) {
+bool read_parameter(const DriveConfig& data, ParameterId id, ParameterValue& value) {
+    const auto& config = data.app;
+    const auto& base = data.base;
     value = {};
     switch (id) {
-        case ParameterId::SERVO_POS_P_GAIN: value = value_or_default(config.servo_pos_p_gain, VBDriveDefaults::SERVO_POS_P_GAIN); return true;
-        case ParameterId::SERVO_POS_I_GAIN: value = value_or_default(config.servo_pos_i_gain, VBDriveDefaults::SERVO_POS_I_GAIN); return true;
-        case ParameterId::SERVO_POS_D_GAIN: value = value_or_default(config.servo_pos_d_gain, VBDriveDefaults::SERVO_POS_D_GAIN); return true;
-        case ParameterId::SERVO_VEL_P_GAIN: value = value_or_default(config.servo_vel_p_gain, VBDriveDefaults::SERVO_VEL_P_GAIN); return true;
-        case ParameterId::SERVO_VEL_I_GAIN: value = value_or_default(config.servo_vel_i_gain, VBDriveDefaults::SERVO_VEL_I_GAIN); return true;
-        case ParameterId::SERVO_TR_FORM: value = value_or_default(config.servo_transient_form, VBDriveDefaults::SERVO_TRANSIENT_FORM, uint32_t(0)); return true;
-        case ParameterId::SERVO_TR_VEL: value = value_or_default(config.servo_transient_vel, VBDriveDefaults::SERVO_TRANSIENT_VEL); return true;
+        case ParameterId::SERVO_POS_P_GAIN: value = value_or_default(config.servo_pos_p_gain, parameter_default<float>(ParameterId::SERVO_POS_P_GAIN)); return true;
+        case ParameterId::SERVO_POS_I_GAIN: value = value_or_default(config.servo_pos_i_gain, parameter_default<float>(ParameterId::SERVO_POS_I_GAIN)); return true;
+        case ParameterId::SERVO_POS_D_GAIN: value = value_or_default(config.servo_pos_d_gain, parameter_default<float>(ParameterId::SERVO_POS_D_GAIN)); return true;
+        case ParameterId::SERVO_VEL_P_GAIN: value = value_or_default(config.servo_vel_p_gain, parameter_default<float>(ParameterId::SERVO_VEL_P_GAIN)); return true;
+        case ParameterId::SERVO_VEL_I_GAIN: value = value_or_default(config.servo_vel_i_gain, parameter_default<float>(ParameterId::SERVO_VEL_I_GAIN)); return true;
+        case ParameterId::SERVO_CONTROL_INPUT_BANDWITH: value = value_or_default(config.servo_control_input_bandwith, parameter_default<float>(ParameterId::SERVO_CONTROL_INPUT_BANDWITH)); return true;
+        case ParameterId::SERVO_CONTROL_VEL_LIMIT: value = value_or_default(config.servo_control_vel_limit, parameter_default<float>(ParameterId::SERVO_CONTROL_VEL_LIMIT)); return true;
+        case ParameterId::SERVO_CONTROL_ACCEL_LIMIT: value = value_or_default(config.servo_control_accel_limit, parameter_default<float>(ParameterId::SERVO_CONTROL_ACCEL_LIMIT)); return true;
+        case ParameterId::SERVO_CONTROL_DECEL_LIMIT: value = value_or_default(config.servo_control_decel_limit, parameter_default<float>(ParameterId::SERVO_CONTROL_DECEL_LIMIT)); return true;
+        case ParameterId::SERVO_CONTROL_VEL_RAMP_RATE: value = value_or_default(config.servo_control_vel_ramp_rate, parameter_default<float>(ParameterId::SERVO_CONTROL_VEL_RAMP_RATE)); return true;
         case ParameterId::ANG_DIR:
             value.emplace<int32_t>(config.angle_direction == -1 ? -1 : 1);
             return true;
@@ -38,70 +45,73 @@ bool read_parameter(const VBDriveConfig& config, ParameterId id, ParameterValue&
             value.emplace<bool>(bootloader_reboot_pending);
             return true;
         case ParameterId::GEAR:
-            value.emplace<uint32_t>(value_or_default(config.gear_ratio, VBDriveDefaults::GEAR_RATIO, static_cast<uint8_t>(0)));
+            value.emplace<uint32_t>(value_or_default(config.gear_ratio, static_cast<uint8_t>(parameter_default<uint32_t>(ParameterId::GEAR)), static_cast<uint8_t>(0)));
             return true;
         case ParameterId::MAX_I:
-            value.emplace<float>(value_or_default(config.max_current, NAN));
+            value.emplace<float>(value_or_default(config.max_current, parameter_default<float>(ParameterId::MAX_I)));
             return true;
         case ParameterId::MAX_SPD:
-            value.emplace<float>(value_or_default(config.max_speed, NAN));
+            value.emplace<float>(value_or_default(config.max_speed, parameter_default<float>(ParameterId::MAX_SPD)));
             return true;
         case ParameterId::MAX_TQ:
-            value.emplace<float>(value_or_default(config.max_torque, NAN));
+            value.emplace<float>(value_or_default(config.max_torque, parameter_default<float>(ParameterId::MAX_TQ)));
             return true;
         case ParameterId::ANG_OFF:
-            value.emplace<float>(value_or_default(config.angle_offset, VBDriveDefaults::ANGLE_OFFSET));
+            value.emplace<float>(value_or_default(config.angle_offset, parameter_default<float>(ParameterId::ANG_OFF)));
             return true;
         case ParameterId::MIN_ANG:
-            value.emplace<float>(value_or_default(config.min_angle, NAN));
+            value.emplace<float>(value_or_default(config.min_angle, parameter_default<float>(ParameterId::MIN_ANG)));
             return true;
         case ParameterId::MAX_ANG:
-            value.emplace<float>(value_or_default(config.max_angle, NAN));
+            value.emplace<float>(value_or_default(config.max_angle, parameter_default<float>(ParameterId::MAX_ANG)));
             return true;
         case ParameterId::KT:
-            value.emplace<float>(value_or_default(config.torque_const, VBDriveDefaults::TORQUE_CONST));
+            value.emplace<float>(value_or_default(config.torque_const, parameter_default<float>(ParameterId::KT)));
             return true;
         case ParameterId::KP:
-            value.emplace<float>(value_or_default(config.kp, VBDriveDefaults::PID_KP));
+            value.emplace<float>(value_or_default(config.kp, parameter_default<float>(ParameterId::KP)));
             return true;
         case ParameterId::KI:
-            value.emplace<float>(value_or_default(config.ki, VBDriveDefaults::PID_KI));
+            value.emplace<float>(value_or_default(config.ki, parameter_default<float>(ParameterId::KI)));
             return true;
         case ParameterId::KD:
-            value.emplace<float>(value_or_default(config.kd, VBDriveDefaults::PID_KD));
+            value.emplace<float>(value_or_default(config.kd, parameter_default<float>(ParameterId::KD)));
             return true;
         case ParameterId::FLT_A:
-            value.emplace<float>(value_or_default(config.filter_a, VBDriveDefaults::FILTER_A));
+            value.emplace<float>(value_or_default(config.filter_a, parameter_default<float>(ParameterId::FLT_A)));
             return true;
         case ParameterId::FLT_G1:
-            value.emplace<float>(value_or_default(config.filter_g1, VBDriveDefaults::FILTER_G1));
+            value.emplace<float>(value_or_default(config.filter_g1, parameter_default<float>(ParameterId::FLT_G1)));
             return true;
         case ParameterId::FLT_G2:
-            value.emplace<float>(value_or_default(config.filter_g2, VBDriveDefaults::FILTER_G2));
+            value.emplace<float>(value_or_default(config.filter_g2, parameter_default<float>(ParameterId::FLT_G2)));
             return true;
         case ParameterId::FLT_G3:
-            value.emplace<float>(value_or_default(config.filter_g3, VBDriveDefaults::FILTER_G3));
+            value.emplace<float>(value_or_default(config.filter_g3, parameter_default<float>(ParameterId::FLT_G3)));
             return true;
         case ParameterId::I_LPF:
-            value.emplace<float>(value_or_default(config.I_lpf_coefficient, VBDriveDefaults::I_LPF));
+            value.emplace<float>(value_or_default(config.I_lpf_coefficient, parameter_default<float>(ParameterId::I_LPF)));
             return true;
         case ParameterId::ANG_ENC:
             value.emplace<uint32_t>(to_underlying(config.angle_encoder));
             return true;
         case ParameterId::NODE_ID:
-            value.emplace<uint32_t>(config.node_id);
+            value.emplace<uint32_t>(base.node_id);
             return true;
         case ParameterId::DATA_BAUD:
-            value.emplace<uint32_t>(to_underlying(config.fdcan_data_baud));
+            value.emplace<uint32_t>(base.fdcan_data_baud);
             return true;
         case ParameterId::NOMINAL_BAUD:
-            value.emplace<uint32_t>(to_underlying(config.fdcan_nominal_baud));
+            value.emplace<uint32_t>(base.fdcan_nominal_baud);
+            return true;
+        case ParameterId::SERIAL_BAUD:
+            value.emplace<uint32_t>(base.serial_baud);
             return true;
         case ParameterId::CMD_ERRORS:
             value.emplace<uint32_t>(invalid_commands_counter);
             return true;
         case ParameterId::NAME:
-            value.emplace<std::string_view>(config.name, strnlen(config.name, sizeof(config.name)));
+            value.emplace<std::string_view>(base.name, strnlen(base.name, sizeof(base.name)));
             return true;
         case ParameterId::REVISION:
             value.emplace<std::string_view>(VBDRIVE_FIRMWARE_REV);
@@ -147,29 +157,52 @@ bool read_parameter(const VBDriveConfig& config, ParameterId id, ParameterValue&
 }
 
 ParameterWriteResult write_persistent_parameter(
-    VBDriveConfig& config,
+    DriveConfig& data,
     ParameterId id,
     const ParameterValue& value,
     bool apply_runtime
 ) {
+    auto& config = data.app;
+    auto& base = data.base;
+    if (id == ParameterId::SERIAL_BAUD) {
+        const auto baud = std::get<uint32_t>(value);
+        if (!voltbro_serial_baud_valid(baud)) return ParameterWriteResult::INVALID;
+        base.serial_baud = baud;
+        return ParameterWriteResult::OK;
+    }
     if (id == ParameterId::NAME) {
         const auto name = std::get<std::string_view>(value);
-        if (name.empty() || name.size() >= sizeof(config.name)) return ParameterWriteResult::INVALID;
+        if (name.empty() || name.size() >= sizeof(base.name)) return ParameterWriteResult::INVALID;
         for (unsigned char byte : name) {
             if (byte < 0x20 || byte == 0x7F) return ParameterWriteResult::INVALID;
         }
-        memset(config.name, 0, sizeof(config.name));
-        memcpy(config.name, name.data(), name.size());
+        memset(base.name, 0, sizeof(base.name));
+        memcpy(base.name, name.data(), name.size());
         return ParameterWriteResult::OK;
     }
-    if (id >= ParameterId::SERVO_POS_P_GAIN && id <= ParameterId::SERVO_TR_VEL) {
-        if (id == ParameterId::SERVO_TR_FORM) {
-            const auto form = std::get<uint32_t>(value);
-            if (form != 1 && form != 2) return ParameterWriteResult::INVALID;
-            config.servo_transient_form = form;
+    if (id >= ParameterId::SERVO_POS_P_GAIN && id <= ParameterId::SERVO_CONTROL_VEL_RAMP_RATE) {
+        const float gain = std::get<float>(value);
+        const bool generator_parameter = id >= ParameterId::SERVO_CONTROL_INPUT_BANDWITH;
+        if ((!std::isfinite(gain) && !(generator_parameter && std::isnan(gain))) || gain < 0) {
+            return ParameterWriteResult::INVALID;
+        }
+        if (generator_parameter) {
+            VBDriveConfig candidate = config;
+            switch (id) {
+                case ParameterId::SERVO_CONTROL_INPUT_BANDWITH: candidate.servo_control_input_bandwith = gain; break;
+                case ParameterId::SERVO_CONTROL_VEL_LIMIT: candidate.servo_control_vel_limit = gain; break;
+                case ParameterId::SERVO_CONTROL_ACCEL_LIMIT: candidate.servo_control_accel_limit = gain; break;
+                case ParameterId::SERVO_CONTROL_DECEL_LIMIT: candidate.servo_control_decel_limit = gain; break;
+                case ParameterId::SERVO_CONTROL_VEL_RAMP_RATE: candidate.servo_control_vel_ramp_rate = gain; break;
+                default: break;
+            }
+            if (apply_runtime) {
+                auto motor = get_motor();
+                if (!motor) return ParameterWriteResult::UNAVAILABLE;
+                if (!motor->set_servo_input_config(candidate.servo_input_config())) return ParameterWriteResult::INVALID;
+            }
+            config = candidate;
         } else {
-            const float gain = std::get<float>(value);
-            if (!std::isfinite(gain) || gain < 0) return ParameterWriteResult::INVALID;
             if (apply_runtime && id <= ParameterId::SERVO_VEL_I_GAIN) {
                 auto motor = get_motor();
                 if (!motor) return ParameterWriteResult::UNAVAILABLE;
@@ -191,7 +224,6 @@ ParameterWriteResult write_persistent_parameter(
                 case ParameterId::SERVO_POS_D_GAIN: config.servo_pos_d_gain = gain; break;
                 case ParameterId::SERVO_VEL_P_GAIN: config.servo_vel_p_gain = gain; break;
                 case ParameterId::SERVO_VEL_I_GAIN: config.servo_vel_i_gain = gain; break;
-                case ParameterId::SERVO_TR_VEL: config.servo_transient_vel = gain; break;
                 default: break;
             }
         }
@@ -251,16 +283,16 @@ ParameterWriteResult write_persistent_parameter(
             config.angle_encoder = static_cast<AngleEncoderType>(std::get<uint32_t>(value));
             break;
         case ParameterId::NODE_ID:
-            if (std::get<uint32_t>(value) == 0 || std::get<uint32_t>(value) > CANARD_NODE_ID_MAX) return ParameterWriteResult::INVALID;
-            config.node_id = static_cast<CanardNodeID>(std::get<uint32_t>(value));
+            if (std::get<uint32_t>(value) == 0 || std::get<uint32_t>(value) > 127U) return ParameterWriteResult::INVALID;
+            base.node_id = static_cast<uint8_t>(std::get<uint32_t>(value));
             break;
         case ParameterId::DATA_BAUD:
-            if (std::get<uint32_t>(value) > to_underlying(FDCANDataBaud::KHz8000)) return ParameterWriteResult::INVALID;
-            config.fdcan_data_baud = static_cast<FDCANDataBaud>(std::get<uint32_t>(value));
+            if (std::get<uint32_t>(value) > 3U) return ParameterWriteResult::INVALID;
+            base.fdcan_data_baud = static_cast<uint8_t>(std::get<uint32_t>(value));
             break;
         case ParameterId::NOMINAL_BAUD:
-            if (std::get<uint32_t>(value) > to_underlying(FDCANNominalBaud::KHz1000)) return ParameterWriteResult::INVALID;
-            config.fdcan_nominal_baud = static_cast<FDCANNominalBaud>(std::get<uint32_t>(value));
+            if (std::get<uint32_t>(value) > 4U) return ParameterWriteResult::INVALID;
+            base.fdcan_nominal_baud = static_cast<uint8_t>(std::get<uint32_t>(value));
             break;
         default:
             return ParameterWriteResult::READ_ONLY;
@@ -280,7 +312,35 @@ ParameterWriteResult write_runtime_parameter(ParameterId id, const ParameterValu
     if (!motor) {
         return ParameterWriteResult::UNAVAILABLE;
     }
-    return motor->set_state(std::get<bool>(value)) == HAL_OK
-        ? ParameterWriteResult::OK
-        : ParameterWriteResult::INVALID;
+    const bool enabled = std::get<bool>(value);
+    if (!enabled) motor->reset_servo_input();
+    return motor->set_state(enabled) == HAL_OK ? ParameterWriteResult::OK : ParameterWriteResult::INVALID;
 }
+
+bool VBDriveConfig::are_required_params_set(const BaseConfigData& base) const {
+    return base.node_id != 0 && gear_ratio != 0;
+}
+
+ServoInputConfig VBDriveConfig::servo_input_config() const {
+    return {
+        .input_bandwidth = value_or_default(servo_control_input_bandwith, parameter_default<float>(ParameterId::SERVO_CONTROL_INPUT_BANDWITH)),
+        .velocity_limit = value_or_default(servo_control_vel_limit, parameter_default<float>(ParameterId::SERVO_CONTROL_VEL_LIMIT)),
+        .acceleration_limit = value_or_default(servo_control_accel_limit, parameter_default<float>(ParameterId::SERVO_CONTROL_ACCEL_LIMIT)),
+        .deceleration_limit = value_or_default(servo_control_decel_limit, parameter_default<float>(ParameterId::SERVO_CONTROL_DECEL_LIMIT)),
+        .velocity_ramp_rate = value_or_default(servo_control_vel_ramp_rate, parameter_default<float>(ParameterId::SERVO_CONTROL_VEL_RAMP_RATE))
+    };
+}
+
+void VBDriveConfig::apply_servo_config() const {
+    auto motor = get_motor();
+    if (!motor) return;
+    motor->update_servo_config(SetPointType::POSITION,
+        PIDConfig{.kp = value_or_default(servo_pos_p_gain, parameter_default<float>(ParameterId::SERVO_POS_P_GAIN)),
+                  .ki = value_or_default(servo_pos_i_gain, parameter_default<float>(ParameterId::SERVO_POS_I_GAIN)),
+                  .kd = value_or_default(servo_pos_d_gain, parameter_default<float>(ParameterId::SERVO_POS_D_GAIN))});
+    motor->update_servo_config(SetPointType::VELOCITY,
+        PIDConfig{.kp = value_or_default(servo_vel_p_gain, parameter_default<float>(ParameterId::SERVO_VEL_P_GAIN)),
+                  .ki = value_or_default(servo_vel_i_gain, parameter_default<float>(ParameterId::SERVO_VEL_I_GAIN))});
+    motor->set_servo_input_config(servo_input_config());
+}
+

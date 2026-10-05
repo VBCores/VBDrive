@@ -117,7 +117,7 @@ try:
             else:
                 command(f'mit_cmd: 0 {target:.7f} 0 0 {args.kd:g}')
         else:
-            command(f'servo_cmd: {2 if args.control == "position" else 0} {target:.7f}')
+            command(f'servo_cmd: {3 if args.control == "position" else 0} {target:.7f}')
 
     base = statistics.median(row[1] for row in samples[-100:]) if args.control == 'position' else 0.0
     set_target(base)

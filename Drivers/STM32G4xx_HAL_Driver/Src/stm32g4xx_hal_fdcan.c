@@ -2256,6 +2256,8 @@ HAL_StatusTypeDef HAL_FDCAN_GetRxMessage(FDCAN_HandleTypeDef *hfdcan, uint32_t R
 
         /* Calculate Rx FIFO 0 element index */
         GetIndex += ((hfdcan->Instance->RXF0S & FDCAN_RXF0S_F0GI) >> FDCAN_RXF0S_F0GI_Pos);
+        /* Overwrite skips one slot; wrap at the three-element FIFO boundary. */
+        if (GetIndex >= SRAMCAN_RF0_NBR) GetIndex -= SRAMCAN_RF0_NBR;
 
         /* Calculate Rx FIFO 0 element address */
         RxAddress = (uint32_t *)(hfdcan->msgRam.RxFIFO0SA + (GetIndex * SRAMCAN_RF0_SIZE));
@@ -2285,6 +2287,8 @@ HAL_StatusTypeDef HAL_FDCAN_GetRxMessage(FDCAN_HandleTypeDef *hfdcan, uint32_t R
 
         /* Calculate Rx FIFO 1 element index */
         GetIndex += ((hfdcan->Instance->RXF1S & FDCAN_RXF1S_F1GI) >> FDCAN_RXF1S_F1GI_Pos);
+        /* Overwrite skips one slot; wrap at the three-element FIFO boundary. */
+        if (GetIndex >= SRAMCAN_RF1_NBR) GetIndex -= SRAMCAN_RF1_NBR;
         /* Calculate Rx FIFO 1 element address */
         RxAddress = (uint32_t *)(hfdcan->msgRam.RxFIFO1SA + (GetIndex * SRAMCAN_RF1_SIZE));
       }

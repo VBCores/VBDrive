@@ -8,8 +8,10 @@ import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[1]
-app = (root / 'App/app.cpp').read_text()
-handler = app[app.index('bool apply_mit_command('):app.index('class ServoSub:')]
+app = (root / 'App/communications/cyphal/interface.hpp').read_text()
+state = (root / 'App/state_manager/state_manager.cpp').read_text()
+shared = state[state.index('bool apply_mit_command('):state.index('void reboot_to_bootloader_if_requested')]
+handler = shared + app[app.index('class FOCCommandSub:'):app.index('class ServoSub:')]
 servo_handler = app[app.index('class ServoSub:'):app.index('// NOTE: underlying CanardRxSubscriptions')]
 source = r'''
 #include <cassert>
@@ -18,6 +20,8 @@ source = r'''
 #include <cstdio>
 #include <initializer_list>
 #include <utility>
+#define VBDRIVE_PROFILE_RESULT(kind, accepted)
+#define VBDRIVE_PROFILE_HANDLER(stats)
 #include <libcanard/canard.h>
 #include <voltbro/foc/command_1_0.h>
 #include <voltbro/foc/MIT_1_0.h>
@@ -43,6 +47,10 @@ struct Motor {
     bool set_angle_point(float v) {servo_type=2; servo_value=v; return valid;}
     bool set_voltage_point(float v) {servo_type=3; servo_value=v; return valid;}
     bool set_foc_point(FOCTarget t) {target=t; ++targets; return valid;}
+    bool set_servo_command(uint8_t type,float value,bool,uint8_t) {
+        if (!valid || type>6) return false;
+        servo_type=type; servo_value=value; return true;
+    }
     void set_current_regulator_params(float p,float i) {kp=p; ki=i; ++gains;}
 } device;
 Motor* motor=&device;
@@ -52,20 +60,28 @@ void record_invalid_command() {++errors;}
 '''+handler+servo_handler+r'''
 int main() {
     ServoSub servo_sub(0,3418);
-    for (uint8_t type : {0,1,2,3,4,255}) {
+    for (uint8_t type : {0,1,2,3,4,5,6,255}) {
         device=Motor{}; errors=0;
         voltbro_foc_Servo_1_0 command{};
-        command.set_point_type=type; command.set_point_value=.25f;
+        command.control_type=type; command.set_point_value=.25f;
         servo_sub.handler(command,nullptr);
-        if (type<4) {
+        if (type<7) {
             assert(device.servo_type==type && device.servo_value==.25f && errors==0);
         } else assert(device.servo_type==-1 && errors==1);
         voltbro_foc_specific_control_1_0 legacy{};
         legacy.set_point_type=type; legacy.set_point_value=.25f;
-        uint8_t a[5]{},b[5]{}; size_t na=5,nb=5;
+        uint8_t a[voltbro_foc_Servo_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_]{};
+        uint8_t b[5]{}; size_t na=sizeof(a),nb=5;
         assert(voltbro_foc_Servo_1_0_serialize_(&command,a,&na)==0);
         assert(voltbro_foc_specific_control_1_0_serialize_(&legacy,b,&nb)==0);
-        assert(na==5 && nb==5 && std::memcmp(a,b,5)==0);
+        assert(na==6 && nb==5 && std::memcmp(a,b,5)==0);
+        command.command_idx.count=1; command.command_idx.elements[0]=255;
+        na=sizeof(a);
+        assert(voltbro_foc_Servo_1_0_serialize_(&command,a,&na)==0 && na==7);
+        voltbro_foc_Servo_1_0 decoded{};
+        assert(voltbro_foc_Servo_1_0_deserialize_(&decoded,a,&na)==0);
+        assert(decoded.control_type==type && decoded.set_point_value==.25f);
+        assert(decoded.command_idx.count==1 && decoded.command_idx.elements[0]==255);
     }
     device=Motor{}; device.valid=false; errors=0;
     servo_sub.handler({},nullptr); assert(errors==1);

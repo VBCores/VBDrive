@@ -9,21 +9,32 @@ base = root / 'Drivers/libvoltbro/voltbro/motors/bldc/foc'
 header = (base / 'foc.hpp').read_text()
 source = (base / 'foc.cpp').read_text()
 state = header[header.index('    struct FilterState'):header.index('    float elec_angle')]
-body = source[source.index('void FOC::apply_kalman()'):source.index('void FOC::update_shaft_angle()')]
+body = source[source.index('void FOC::apply_kalman()'):source.index('void FOC::update_sensors()')]
 code = r'''
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include "voltbro/profiling.hpp"
 #define pi2 6.28318530718f
 #define PI 3.14159265358979f
 float mfmod(float x,float y) { return x-int(x/y)*y; }
 struct FOC {
- float raw_rotor_angle=0, elec_angle=0, shaft_velocity=0, T=.000025f;
+ float raw_rotor_angle=0, elec_angle=0, shaft_velocity=0, shaft_angle=0, T=.000025f;
  struct {float expected_a=0,g1=.015700989410003974f,g2=3.925227776360174f,g3=387.54711795263574f;} filters_config;
  struct {struct {int ppairs=14,gear_ratio=36;} common;} drive_info;
-''' + state + 'void apply_kalman();\n};\n' + body + r'''
+''' + state + 'void apply_kalman();\nvoid update_shaft_angle();\n};\n' + body + r'''
 float phase_error(float a,float b) { return std::remainder(a-b,pi2); }
 int main() {
+ // Shaft position deliberately uses the encoder before the state filter.
+ FOC shaft;
+ shaft.shaft_velocity=42;
+ for(float unwrapped : {1.f,2.f,3.f,4.f,5.f,6.f,6.4f,6.f,5.f}) {
+  shaft.raw_rotor_angle=std::fmod(unwrapped,pi2);
+  shaft.filter_state.rotor_angle=shaft.raw_rotor_angle+2; // Must not affect reported position.
+  shaft.update_shaft_angle();
+  assert(std::fabs(shaft.shaft_angle-unwrapped/36)<1e-6f);
+  assert(shaft.shaft_velocity==42);
+ }
  // Arbitrary starting phases must not manufacture motion, including near the wrap.
  for(float angle : {0.f,1.f,3.5f,6.28f}) {
   FOC m; m.raw_rotor_angle=angle;
@@ -65,5 +76,5 @@ code = '#include <initializer_list>\n' + code
 with tempfile.TemporaryDirectory(prefix='vbdrive-kalman-') as directory:
     path = Path(directory)
     (path / 'test.cpp').write_text(code)
-    subprocess.run(['clang++', '-std=c++17', '-O2', str(path/'test.cpp'), '-o', str(path/'test')], check=True)
+    subprocess.run(['clang++', '-std=c++17', '-O2', '-I'+str(root/'Drivers/libvoltbro'), str(path/'test.cpp'), '-o', str(path/'test')], check=True)
     subprocess.run([str(path/'test')], check=True)
