@@ -205,7 +205,7 @@ int main() {
         assert(dump.find("are all required params set: true")!=std::string::npos);
     }
     manager.set_state(CommandState::RUNNING);
-    assert(command("firmware_rev:?\r\n").find("0123456789abcdef")!=std::string::npos);
+    assert(command("firmware_rev:?\r\n").find("4.0.0")!=std::string::npos);
     assert(command("name:?").find("name:vbdrive")==0);
     uart_frames.clear();
     assert(command("CALIBRATE")=="CALIBRATE FINISH\r\n");
@@ -577,7 +577,7 @@ auto& manager = get_app_manager();
     source += utils + callback + '\nvoid drain_serial(){process_serial(); for(int i=0;i<16;++i) serial_service();}\n' + TEST
     (tmp / "test.cpp").write_text(source)
     subprocess.run([os.environ.get("CXX", "c++"), "-std=c++20", "-DSTM32G4",
-                    '-DVBDRIVE_FIRMWARE_REV="0123456789abcdef"',
+                    '-DVBDRIVE_FIRMWARE_REV="4.0.0"',
                     "-I"+str(tmp), "-I"+str(ROOT/"App"), "-I"+str(ROOT/"Drivers/libvoltbro"),
                     "-I"+str(ROOT/"build/Release/cyphal_types/c"), str(tmp/"test.cpp"), "-o", str(tmp/"test")], check=True)
     subprocess.run([str(tmp/"test")], check=True)

@@ -168,7 +168,7 @@ All entries are non-persistent and readable without CONFIG. Writes are rejected.
 | Name | Type | Meaning |
 | --- | --- | --- |
 | `cmd_errors` | natural32 | Rejected Serial/Cyphal movement commands |
-| `firmware_rev` | string | 16 hexadecimal digits of the VBDrive HEAD commit |
+| `firmware_rev` | string | Latest version tag (for example, `4.0.0`) |
 | `bus_voltage` | real32 | Bus voltage, V |
 | `bus_current` | real32 | Working-current measurement, A; not a separate DC-link sensor |
 | `temp_mcu` | real32 | MCU temperature, K |
@@ -184,8 +184,12 @@ its value is the motor sensor temperature.
 | `encoder_rotor` | natural32 | Raw internal encoder counts |
 
 Before motor initialization, unavailable measurements return a Serial error or an
-empty Cyphal value. `firmware_rev` also supplies GetInfo's VCS revision; it identifies
-the commit, not uncommitted changes.
+empty Cyphal value. GetInfo's software major/minor come from the same tag.
+Its numeric VCS revision encodes `major << 32 | minor << 16 | patch`:
+`4.0.0` is `17179869184` (`0x0000000400000000`). Tags use semantic versions
+with optional `v` prefix and suffix; the full spelling is retained in
+`firmware_rev`, while numeric fields encode only major/minor/patch. Major/minor
+must fit 8 bits and patch 16 bits. These versions do not describe uncommitted changes.
 
 ### **FDCAN Baud Rate Configuration**
 

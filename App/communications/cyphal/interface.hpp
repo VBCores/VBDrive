@@ -212,7 +212,7 @@ void setup_subscriptions() {
         "org.voltbro.vbdrive",
         uavcan_node_Version_1_0{1, 0},
         uavcan_node_Version_1_0{1, 0},
-        uavcan_node_Version_1_0{1, 0},
+        uavcan_node_Version_1_0{VBDRIVE_VERSION_MAJOR, VBDRIVE_VERSION_MINOR},
         VBDRIVE_VCS_REVISION_ID
     );
 
