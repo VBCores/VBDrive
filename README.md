@@ -76,18 +76,12 @@ requires all of its parameters to be positive, otherwise it is rejected without
 changing the active target. Filter bandwidth is in 1/s; velocity limits and
 ramp rate are in output rad/s and rad/s². POSITION uses
 `motor_torque = Kp * (target - position) + I - Kd * velocity`; VELOCITY uses
-`motor_torque = Kp * (target - velocity) + I`. These are independent controllers,
-P/D run every 25 microseconds. I accumulates those error samples and updates
-once per five ticks, in motor-side N m.
+`motor_torque = Kp * (target - velocity) + I`.
+
 Torque is limited by hardware, user output-shaft torque (converted through
 `gear`) and available current (including stall derating), with conditional
-integration to prevent windup. Position D uses measured velocity,
-so target steps do not cause derivative kick. `max_spd` validates VELOCITY targets;
-it does not limit actual speed in POSITION. Zero gains produce zero torque.
-With `Ki = 0`, MIT feedforward torque and desired velocity both zero, matching
-POSITION `Kp` and `Kd` values request the same motor current in MIT and SERVO.
-For VELOCITY, matching `Kp` values and `Ki = 0` likewise give the same current
-as MIT velocity control with zero position gain and feedforward.
+integration to prevent windup.
+
 `POSITION_FILTER` smooths the position input with a critically damped second-order
 filter. Its effective bandwidth is capped at one quarter of the 5 kHz reference
 update rate (1250 s^-1). `POSITION_POLY` plans a trapezoidal velocity profile from the measured
@@ -97,8 +91,16 @@ per second. These modes shape the input of the existing Servo PID; its feedback
 does not alter the generated reference. Limits govern the reference, not actual
 motor motion. Configuration changes take effect immediately.
 
-Servo control IDs are 0 VELOCITY_DIRECT, 1 VELOCITY_RAMP, 2 TORQUE_DIRECT,
-3 POSITION_DIRECT, 4 POSITION_FILTER, 5 POSITION_POLY, 6 VOLTAGE_DIRECT.
+> Servo control IDs are:
+>
+> - 0 VELOCITY_DIRECT
+> - 1 VELOCITY_RAMP
+> - 2 TORQUE_DIRECT
+> - 3 POSITION_DIRECT
+> - 4 POSITION_FILTER
+> - 5 POSITION_POLY
+> - 6 VOLTAGE_DIRECT
+
 The Servo wire format contains `control_type`, `set_point_value` and an
 optional one-byte `command_idx`.
 An absent index deduplicates consecutive identical commands. With an index,
@@ -108,56 +110,6 @@ from measurements when a new command arrives. FILTER and RAMP continue their
 reference; STOP, disable, MIT and calibration reset command history.
 At high command rates the three-frame FDCAN receive FIFO uses overwrite mode,
 so a full FIFO retains the newest frames. The firmware keeps no second command queue.
-
-These starting gains were smoke-tested on M4310 with gear=36, kt=0.5,
-max_i=0.3 A and max_tq=5 Nm, using small commands in both directions.
-They are not load-independent tuning; check them with the actual mechanics and
-current/torque limits. Defaults apply to fresh configuration and RESET. The
-new EEPROM type requires restoring saved parameters and recalibrating once.
-
-`ParameterDefinition::default_value` in `App/config/config.hpp` holds the effective defaults. Float fields in `VBDriveConfig`
-are `NAN` until explicitly set. Generator parameters read as zero by default.
-Serial/Cyphal reads and motor initialization resolve these sentinels identically.
-A default does not mark a required parameter as configured: stored `gear=0`
-still means unset even though its effective default is 36. Measurements have no default.
-Servo uses two libvoltbro `PIDRegulator` instances, with explicit measured
-derivative and conditional integration; FOC holds no separate PID state.
-
-Serial writes require CONFIG: SAVE applies Servo gains, APPLY saves and reboots,
-and EXIT discards staged changes. Other settings may still require APPLY.
-Cyphal gain writes apply before the next FOC tick and are saved by the existing
-deferred-save path, without exposing unsaved Serial CONFIG values.
-Changing a gain resets that controller's state but retains its target; rewriting
-the same gain or changing a target within the same mode does not reset it.
-Changing control mode resets both Servo integrators. Disable/enable clears the old
-target and waits at zero effort for a new command. TORQUE, VOLTAGE and MIT retain
-their control laws. Register identifiers are string views,
-not heap-allocated strings. The composite `servo_params` register is not used.
-
-Configuration is stored as two contiguous, independently identified blocks:
-
-| EEPROM offset | Bytes | Contents | Type ID |
-| --- | ---: | --- | --- |
-| `VB_CONFIG_ADDRESS` (default `0x0000`) | 28 | Common `BaseConfigData`: node ID, CAN/Serial rates, name, configured flag | `0x01234567` |
-| `VB_CONFIG_ADDRESS + 0x1C` | 110 | `VBDriveConfig`: motor, limits, observer and Servo settings | `0x44AAAC02` |
-| `0x0100` | 8204 | Motor calibration | `0x89ABCDEF` |
-| `0x2200` | 8 | Inductive encoder setup state | `0xAAAAAA99` |
-
-`-DVB_CONFIG_ADDRESS=0` selects the configuration byte address for both the
-application and the VBBoot sub-build. Decimal and hexadecimal values are accepted.
-The complete record must fit the 32 KiB EEPROM without overlapping calibration
-or encoder state. Those two regions keep their fixed addresses. A different
-address selects a different record; existing bytes are not moved.
-
-The application saves the 138-byte configuration together. A later change of
-application schema resets only its block; common communication settings and name
-survive. Calibration has a fixed address independent of configuration size.
-VBBoot reads the common block from the same C-compatible libvoltbro header.
-
-Schema mismatches reset the corresponding configuration block. Configuration
-records are not automatically migrated or relocated.
-Flashing MCU firmware alone does not erase external EEPROM.
-
 
 ---
 
