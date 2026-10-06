@@ -147,8 +147,8 @@ void create_motor(VBDriveConfig& config_data) {
         // Built-in constant parameters
         DriveInfo {
             .torque_const = value_or_default(config_data.torque_const, parameter_default<float>(ParameterId::KT)),
-            .max_current = 30.0,
-            .max_torque = 30.0f,
+            .max_current = value_or_default(config_data.rated_max_current, parameter_default<float>(ParameterId::RATED_MAX_CURRENT)),
+            .max_torque = value_or_default(config_data.rated_max_torque, parameter_default<float>(ParameterId::RATED_MAX_TORQUE)),
             .stall_current = 6.0f,
             .stall_timeout = 3.0f,
             .stall_tolerance = 0.2f,

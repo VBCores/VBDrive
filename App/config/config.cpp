@@ -56,6 +56,12 @@ bool read_parameter(const DriveConfig& data, ParameterId id, ParameterValue& val
         case ParameterId::MAX_TQ:
             value.emplace<float>(value_or_default(config.max_torque, parameter_default<float>(ParameterId::MAX_TQ)));
             return true;
+        case ParameterId::RATED_MAX_TORQUE:
+            value.emplace<float>(value_or_default(config.rated_max_torque, parameter_default<float>(ParameterId::RATED_MAX_TORQUE)));
+            return true;
+        case ParameterId::RATED_MAX_CURRENT:
+            value.emplace<float>(value_or_default(config.rated_max_current, parameter_default<float>(ParameterId::RATED_MAX_CURRENT)));
+            return true;
         case ParameterId::ANG_OFF:
             value.emplace<float>(value_or_default(config.angle_offset, parameter_default<float>(ParameterId::ANG_OFF)));
             return true;
@@ -116,6 +122,9 @@ bool read_parameter(const DriveConfig& data, ParameterId id, ParameterValue& val
         case ParameterId::REVISION:
             value.emplace<std::string_view>(VBDRIVE_FIRMWARE_REV);
             return true;
+        case ParameterId::DEVICE:
+            value.emplace<std::string_view>("vbdrive");
+            return true;
         case ParameterId::IS_FAULT:
             // DRV_FAULT integration is deferred, matching main telemetry.
             value.emplace<bool>(false);
@@ -156,7 +165,7 @@ bool read_parameter(const DriveConfig& data, ParameterId id, ParameterValue& val
     }
 }
 
-ParameterWriteResult write_persistent_parameter(
+[[gnu::optimize("Os")]] ParameterWriteResult write_persistent_parameter(
     DriveConfig& data,
     ParameterId id,
     const ParameterValue& value,
@@ -164,6 +173,15 @@ ParameterWriteResult write_persistent_parameter(
 ) {
     auto& config = data.app;
     auto& base = data.base;
+    if (id == ParameterId::RATED_MAX_TORQUE || id == ParameterId::RATED_MAX_CURRENT) {
+        const float rating = value_or_default(std::get<float>(value), id == ParameterId::RATED_MAX_CURRENT
+            ? parameter_default<float>(ParameterId::RATED_MAX_CURRENT)
+            : parameter_default<float>(ParameterId::RATED_MAX_TORQUE));
+        if (!std::isfinite(rating) || rating <= 0) return ParameterWriteResult::INVALID;
+        if (id == ParameterId::RATED_MAX_CURRENT) config.rated_max_current = std::get<float>(value);
+        else config.rated_max_torque = std::get<float>(value);
+        return ParameterWriteResult::OK;
+    }
     if (id == ParameterId::SERIAL_BAUD) {
         const auto baud = std::get<uint32_t>(value);
         if (!voltbro_serial_baud_valid(baud)) return ParameterWriteResult::INVALID;
@@ -343,4 +361,3 @@ void VBDriveConfig::apply_servo_config() const {
                   .ki = value_or_default(servo_vel_i_gain, parameter_default<float>(ParameterId::SERVO_VEL_I_GAIN))});
     motor->set_servo_input_config(servo_input_config());
 }
-

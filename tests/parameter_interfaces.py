@@ -175,7 +175,7 @@ int main() {
         assert(uart_frames.size()==100);
         for (const auto& frame : uart_frames) assert(frame=="line\r\n");
     }
-    static_assert(sizeof(BaseConfigData)==28 && sizeof(VBDriveConfig)==110 && sizeof(DriveConfig)==138);
+    static_assert(sizeof(BaseConfigData)==28 && sizeof(VBDriveConfig)==118 && sizeof(DriveConfig)==146);
     static_assert(CONFIG_PLACEMENT==0 && CALIBRATION_PLACEMENT==0x100);
     auto& config = manager.get_config();
     for (const auto& definition : PARAMETER_CATALOG) {
@@ -207,6 +207,16 @@ int main() {
     manager.set_state(CommandState::RUNNING);
     assert(command("firmware_rev:?\r\n").find("4.0.0")!=std::string::npos);
     assert(command("name:?").find("name:vbdrive")==0);
+    assert(command("device:?")=="device:vbdrive\n\r");
+    assert(command("rated_max_torque:?")=="rated_max_torque:30.000000\n\r");
+    assert(command("rated_max_current:?")=="rated_max_current:30.000000\n\r");
+    assert(command("rated_max_current:17").find("CONFIG mode required")!=std::string::npos);
+    command("CONFIG");
+    assert(command("rated_max_current:17").find("OK")!=std::string::npos);
+    assert(command("rated_max_torque:23").find("OK")!=std::string::npos);
+    assert(command("rated_max_current:?")=="rated_max_current:17.000000\n\r");
+    command("EXIT");
+    assert(std::isnan(config.app.rated_max_current) && std::isnan(config.app.rated_max_torque));
     uart_frames.clear();
     assert(command("CALIBRATE")=="CALIBRATE FINISH\r\n");
     assert(uart_frames.size()==2 && uart_frames[0]=="CALIBRATE OK\r\n" &&
@@ -309,6 +319,27 @@ int main() {
     manager.persist_pending_config();
     DriveConfig named;
     eeprom.read(&named,0); assert(std::string_view(named.base.name)=="axis-01");
+    assert(named.app.rated_max_current==1 && named.app.rated_max_torque==1);
+    for (auto name : {"rated_max_current", "rated_max_torque"}) {
+        for (float bad : {-1.0f, 0.0f, INFINITY, -INFINITY}) {
+            fill_register_real32(input,bad);
+            assert(access(name,input).real32.value.elements[0]==1);
+        }
+        fill_register_real32(input,.5f); // Explicit user limit is currently 1.
+        assert(access(name,input).real32.value.elements[0]==.5f);
+        assert(config.app.max_current==1 && config.app.max_torque==1);
+        fill_register_real32(input,NAN);
+        assert(access(name,input).real32.value.elements[0]==30);
+    }
+    for (auto name : {"max_i", "max_tq"}) {
+        fill_register_real32(input,31);
+        assert(access(name,input).real32.value.elements[0]==31);
+    }
+    manager.persist_pending_config();
+    eeprom.read(&named,0);
+    assert(std::isnan(named.app.rated_max_current) && std::isnan(named.app.rated_max_torque));
+    assert(named.app.max_current==31 && named.app.max_torque==31);
+    assert(command("device:?")=="device:vbdrive\n\r");
     fill_register_string(input,"1234567890123456"); access("name",input);
     assert(std::string_view(config.base.name)=="axis-01");
     fill_register_natural32(input,1); access("name",input);
@@ -317,7 +348,12 @@ int main() {
     fill_register_integer32(input,0); access("is_on",input); assert(!device.on);
     motor=nullptr; fill_register_natural32(input,13); access("node_id",input); assert(config.base.node_id==13);
     assert(command("STOP")=="STOP OK\r\n");
-    assert(access("encoder_rotor",{})._tag_==REGISTER_EMPTY_TAG); motor=&device;
+    assert(access("encoder_rotor",{})._tag_==REGISTER_EMPTY_TAG);
+    assert(access("rated_max_torque",{})._tag_==REGISTER_REAL32_TAG);
+    assert(access("rated_max_current",{})._tag_==REGISTER_REAL32_TAG);
+    auto identity=access("device",{});
+    assert(std::string_view(reinterpret_cast<char*>(identity._string.value.elements),identity._string.value.count)=="vbdrive");
+    motor=&device;
     for (auto state : {CommandState::INIT, CommandState::RUNNING, CommandState::CONFIG, CommandState::NOT_CALIBRATED}) {
         manager.set_state(state);
         for (const auto& d : PARAMETER_CATALOG) {
@@ -344,9 +380,11 @@ int main() {
     command("servo_pos_d_gain:0.5");
     command("servo_vel_p_gain:3"); command("servo_vel_i_gain:4");
     command("servo_control_vel_limit:5"); command("servo_control_accel_limit:2");
+    command("rated_max_torque:23"); command("rated_max_current:17");
     command("SAVE");
     DriveConfig loaded;
     assert(eeprom.read(&loaded,0)==HAL_OK);
+    assert(loaded.app.rated_max_torque==23 && loaded.app.rated_max_current==17);
     assert(loaded.app.gear_ratio==config.app.gear_ratio && loaded.app.servo_pos_p_gain==1);
     assert(loaded.app.servo_pos_i_gain==2 && loaded.app.servo_vel_p_gain==3 && loaded.app.servo_vel_i_gain==4);
     assert(loaded.app.servo_pos_d_gain==.5f && device.position.kd==.5f);
@@ -542,7 +580,7 @@ int main() {
     assert(device.velocity.kp==0 && device.velocity.ki==0);
     ParameterValue zero_value;
     assert(read_parameter(zero,ParameterId::SERVO_POS_P_GAIN,zero_value) && std::get<float>(zero_value)==0);
-    puts("PASS: 44 shared registers, Serial/Cyphal isolation, Servo apply and persistence, boot commands");
+    puts("PASS: 47 shared registers, Serial/Cyphal isolation, device readonly, persistent ratings, Servo apply and persistence, boot commands");
 }
 '''
 

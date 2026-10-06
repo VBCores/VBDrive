@@ -42,10 +42,11 @@ utils = (ROOT / "Drivers/libvoltbro/voltbro/utils.hpp").read_text()
 source += utils[utils.index("#define CRITICAL_SECTION"):utils.index("// TODO: add optional warning")]
 source += bldc[bldc.index("enum class SetPointType"):bldc.index("enum class DrivePhase")]
 source += foc[foc.index("struct FOCTarget"):foc.index("struct FiltersConfig")]
+source += next(line + '\n' for line in foc.splitlines() if 'constexpr float MAX_BOARD_CURRENT' in line)
 source += '#include "voltbro/motors/bldc/foc/servo_control.hpp"\n'
 source += r'''
 struct DriveInfo {
-    float torque_const=.5f, max_torque=30;
+    float torque_const=.5f, max_torque=30, max_current=30;
     struct { unsigned gear_ratio=2; } common;
 };
 struct RuntimeConfig {
@@ -60,13 +61,13 @@ struct BLDCController {
     DriveInfo drive_info;
     RuntimeConfig drive_runtime_config;
     SetPointType point_type=SetPointType::VOLTAGE;
-    float target=0, shaft_angle=0, shaft_velocity=0;
+    float target=0, shaft_angle=0, shaft_velocity=0, shaft_torque=0;
 '''
 source += bldc[bldc.index("    FORCE_INLINE bool is_symmetric_limit_set"):bldc.index("    const DriveInfo drive_info;")]
 for name in ("virtual void reset_control()", "void set_point(",
              "FORCE_INLINE virtual bool set_angle_point", "FORCE_INLINE virtual bool set_velocity_point",
              "FORCE_INLINE virtual bool set_torque_point", "FORCE_INLINE virtual bool set_voltage_point",
-             "FORCE_INLINE float get_angle()", "FORCE_INLINE float get_velocity()"):
+             "FORCE_INLINE float get_angle()", "FORCE_INLINE float get_velocity()", "FORCE_INLINE virtual float get_torque()"):
     source += function(bldc, name) + "\n"
 source += r'''
 };
@@ -129,12 +130,37 @@ source += r'''
 float mit_current(FOC& motor) {
     const auto& foc_target=motor.foc_target;
     const auto& drive_info=motor.drive_info;
-    const float gear_ratio_f=drive_info.common.gear_ratio;
     auto get_angle=[&] {return motor.get_angle();};
     auto get_velocity=[&] {return motor.get_velocity();};
     auto get_direction_multiplier=[&] {return motor.get_direction_multiplier();};
     float i_q_set;
 ''' + mit_expression + r'''
+    return i_q_set;
+}
+'''
+torque_expression = next(line.strip() for line in implementation.splitlines() if "i_q_set = target /" in line)
+telemetry_expression = next(line.strip() for line in implementation.splitlines() if "shaft_torque = I_Q" in line)
+limit_start = implementation.index("const float abs_max_current_from_torque")
+current_limits = implementation[limit_start:implementation.index("i_q_error =", limit_start)]
+source += r'''
+float torque_current(FOC& motor) {
+    const auto& drive_info=motor.drive_info;
+    const float target=motor.target;
+    float i_q_set;
+''' + torque_expression + r'''
+    return i_q_set;
+}
+float reported_torque(FOC& motor,float I_Q) {
+    const auto& drive_info=motor.drive_info;
+    float shaft_torque;
+''' + telemetry_expression + r'''
+    motor.shaft_torque=shaft_torque;
+    return motor.get_torque();
+}
+float clipped_current(FOC& motor,float i_q_set) {
+    const auto& drive_info=motor.drive_info;
+    const auto& drive_runtime_config=motor.drive_runtime_config;
+''' + current_limits + r'''
     return i_q_set;
 }
 '''
@@ -211,7 +237,7 @@ int main() {
     motor.shaft_angle=0; motor.shaft_velocity=0;
     for (float sign : {-1.f,1.f}) {
         motor.servo_pos_reg.set_integral_error((0) / motor.servo_pos_reg.get_config().ki); motor.set_angle_point(sign);
-        near(motor.servo_period(),sign); near(integral(motor.servo_pos_reg),0);
+        near(motor.servo_period(),2*sign); near(integral(motor.servo_pos_reg),0);
     }
     motor.servo_pos_reg.set_integral_error((2) / motor.servo_pos_reg.get_config().ki); motor.set_angle_point(-.01f);
     motor.servo_period(); assert(integral(motor.servo_pos_reg)<2);
@@ -220,7 +246,7 @@ int main() {
     motor.drive_runtime_config.current_limit=30;
     motor.update_servo_config(SetPointType::POSITION,{.ki=4,.kd=1});
     motor.servo_pos_reg.set_integral_error((2) / motor.servo_pos_reg.get_config().ki); motor.shaft_velocity=-4;
-    near(motor.servo_period(),1); assert(integral(motor.servo_pos_reg)<2); // Unwind despite saturation.
+    near(motor.servo_period(),2); assert(integral(motor.servo_pos_reg)<2); // Unwind despite saturation.
     motor.set_voltage_point(0); near(integral(motor.servo_pos_reg),0); near(integral(motor.servo_vel_reg),0);
     motor.set_foc_point({.torque=1}); motor.set_angle_point(0); near(motor.foc_target.torque,0);
 
@@ -250,10 +276,10 @@ int main() {
         assert(motor.set_foc_point({.velocity=.05f, .velocity_kp=4.f}));
         near(mit_current(motor), .2f*direction);
         assert(motor.set_foc_point({.torque=.2f}));
-        near(mit_current(motor), .02f*direction);
+        near(mit_current(motor), .2f*direction);
         assert(motor.set_foc_point({.torque=.2f, .angle=.1f, .velocity=.05f,
                                     .angle_kp=2.f, .velocity_kp=4.f}));
-        near(mit_current(motor), .42f*direction);
+        near(mit_current(motor), .6f*direction);
     }
     // With zero I and no MIT feedforward, equal gains must request equal Iq.
     for (unsigned gear : {1U, 10U, 36U}) {
@@ -273,6 +299,52 @@ int main() {
         assert(equivalent.set_foc_point({.velocity=.1f, .velocity_kp=.5f}));
         near(servo_velocity_current,mit_current(equivalent));
     }
+    // Production command, telemetry and clipping expressions must not depend on gear.
+    for (unsigned gear : {1U,10U,36U}) for(int direction : {-1,1}) {
+        FOC converted;
+        converted.drive_info.common.gear_ratio=gear;
+        converted.drive_info.torque_const=.5f;
+        converted.drive_runtime_config.user_angle_direction=direction;
+        converted.drive_runtime_config.user_torque_limit=.2f;
+        for(float sign : {-1.f,1.f}) {
+            assert(converted.set_torque_point(sign*.15f));
+            near(torque_current(converted),sign*.3f*direction);
+            near(reported_torque(converted,torque_current(converted)),sign*.15f);
+            assert(converted.set_foc_point({.torque=sign*.15f}));
+            near(mit_current(converted),sign*.3f*direction);
+            converted.update_servo_config(SetPointType::POSITION,{.kp=2});
+            assert(converted.set_angle_point(sign));
+            near(servo_current(converted),sign*.4f*direction);
+            near(reported_torque(converted,servo_current(converted)),sign*.2f);
+        }
+        converted.drive_info.max_torque=.3f;
+        converted.drive_runtime_config.current_limit=10;
+        near(clipped_current(converted,1),.6f);
+        near(clipped_current(converted,-1),-.6f);
+        converted.drive_runtime_config.current_limit=.4f;
+        near(clipped_current(converted,1),.4f);
+        converted.drive_info.max_torque=1000;
+        converted.drive_runtime_config.current_limit=1000;
+        converted.drive_info.max_current=12;
+        near(clipped_current(converted,40),12);
+        near(clipped_current(converted,-40),-12);
+        converted.drive_info.max_current=50;
+        near(clipped_current(converted,40),30);
+        near(clipped_current(converted,-40),-30);
+    }
+    FOC rated_current;
+    rated_current.drive_info.max_current=2;
+    rated_current.update_servo_config(SetPointType::POSITION,{.kp=100,.ki=1});
+    assert(rated_current.set_angle_point(1));
+    near(servo_current(rated_current),2); // Rated current overrides larger runtime limits.
+    near(integral(rated_current.servo_pos_reg),0); // Saturation suppresses integration.
+    rated_current.drive_info.max_current=100;
+    rated_current.drive_info.max_torque=1000;
+    rated_current.drive_runtime_config.user_torque_limit=1000;
+    rated_current.drive_runtime_config.user_current_limit=100;
+    rated_current.drive_runtime_config.current_limit=100;
+    near(servo_current(rated_current),30); // Board cap applies even when rated/user limits are higher.
+    near(integral(rated_current.servo_pos_reg),0);
     VBDrive device;
     device.update_servo_config(SetPointType::POSITION,{.kp=1,.ki=1});
     device.start(); device.set_angle_point(1); device.servo_period();

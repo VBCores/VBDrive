@@ -8,7 +8,8 @@ required. They do not establish physical motor behavior or MCU timing.
 | --- | --- |
 | `python3 tests/servo_input.py` | Standalone generators and abstract lifecycle: filter, ramp, trapezoidal/triangular profiles, reversal, overspeed, completion, invalid inputs and retargeting. |
 | `python3 tests/servo_control.py` | Production FOC command handling and PID, DIRECT/MIT, optional generator, indices, limits, ang_dir, 1:8/1:5 scheduling, interrupt-safe publication and POLY time horizon. |
-| `python3 tests/parameter_interfaces.py` | Production configuration, Serial controller and Cyphal register adapter: 44 registers, defaults, staging, persistence, shared command dispatch and FIFO framing. |
+| `python3 tests/rated_limits.py` | Production BLDC rating priority, effective current/torque limits, larger stored user limits, target validation and stall entry/exit. |
+| `python3 tests/parameter_interfaces.py` | Production configuration, Serial controller and Cyphal register adapter: 47 registers, defaults, staging, persistence, shared command dispatch and FIFO framing. |
 | `python3 tests/refactor_contracts.py` | Shared C/C++ configuration ABI, storage addresses, independent schema validation, staging, VBBoot baud/config loading, profiling counters and README defaults. |
 | `python3 tests/mit_control.py` | Supported 20/28-byte MIT payloads and State serialization across CAN MTUs. |
 | `python3 tests/kalman_filter.py` | Observer initialization, instance isolation, wrap/tracking and shaft angle from the encoder before filtering. |

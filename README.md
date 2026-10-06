@@ -6,7 +6,7 @@
 
 ## Configuration and Control Registers (Serial and Cyphal)
 
-All 44 registers are shared. The following configuration registers are read/write
+All 47 registers are shared. The following configuration registers are read/write
 and persistent; runtime controls `is_on` and `bootloader` are marked separately.
 
 | Parameter | Description | Type | Default |
@@ -16,11 +16,13 @@ and persistent; runtime controls `is_on` and `bootloader` are marked separately.
 | `max_i` | Maximum motor current (A) | Float | `NaN` |
 | `max_spd` | Maximum motor speed target (rad/s) | Float | `NaN` |
 | `max_tq` | Maximum torque output (Nm) | Float | `NaN` |
+| `rated_max_torque` | Rated output-shaft torque limit (`DriveInfo.max_torque`), N m | Float | `30.0` |
+| `rated_max_current` | Rated current limit (`DriveInfo.max_current`), A | Float | `30.0` |
 | `ang_off` | Joint angle offset (rad) | Float | `0.0` |
 | `ang_dir` | Joint angle direction multiplier, -1 or +1 | Integer | `1` |
 | `min_ang` | Minimum allowed angle (rad) | Float | `NaN` |
 | `max_ang` | Maximum allowed angle (rad) | Float | `NaN` |
-| `kt` | Torque constant (Nm/A) | Float | `1.0` |
+| `kt` | Output-shaft torque per ampere (Nm/A) | Float | `1.0` |
 | `kp` | Current proportional gain | Float | `4.0` |
 | `ki` | Current integral gain | Float | `1600.0` |
 | `kd` | Current derivative gain | Float | `0.0` |
@@ -39,7 +41,7 @@ To clear a user-configured limit, write `NaN` to the corresponding register:
 `min_ang`, `max_ang`, `max_spd`, `max_i`, or `max_tq`. Each limit is
 independent. `NaN` removes the angle bound or commanded-speed bound; it does
 not permit a `NaN` movement target. For `max_i` and `max_tq`, `NaN` removes
-only the user limit: the hardware limits (30 A and 30 Nm) and stall derating
+only the user limit: rated limits, the board current cap and stall derating
 still apply. `max_spd` checks velocity targets; it does not cap measured speed
 in POSITION mode. Over Serial, send a value such as `min_ang:nan` in
 `CONFIG`, then use `APPLY` to save and reboot. Cyphal writes to these limit
@@ -47,6 +49,21 @@ registers apply at runtime and are saved.
 
 `node_id = 0` is an unset configuration value. An unconfigured device uses a
 temporary setup node ID derived from its MCU UID.
+
+`rated_max_torque` and `rated_max_current` are read/write and persistent. They
+initialize `DriveInfo` at startup; changed ratings take effect after restart
+(Serial `CONFIG`/`APPLY`, or a restart after Cyphal writes). Ratings must be
+finite and strictly positive; `NaN` restores the default 30, rather than removing
+the rating. Ratings can be reduced below stored `max_tq`/`max_i`; user settings
+remain unchanged. Effective current and torque limits are the minimum of rated
+and positive user limits; an unset user limit uses the rating. Stall derating
+can only reduce the effective current limit. Both Servo saturation and final
+FOC current clipping also enforce `MAX_BOARD_CURRENT = 30 A`, independently of
+the configured rated/user limits.
+
+The application configuration uses type ID `0x44AAAC03` (118 bytes), following
+the 28-byte common block. There is no automatic migration from other application
+schemas; preserve and restore settings when updating firmware across schemas.
 
 | Runtime control | Type | Access | Persistent | Meaning |
 | --- | --- | --- | --- | --- |
@@ -74,13 +91,36 @@ Gains must be finite and non-negative. Generator parameters accept finite
 non-negative values; `NaN` restores the default zero. A generator command
 requires all of its parameters to be positive, otherwise it is rejected without
 changing the active target. Filter bandwidth is in 1/s; velocity limits and
-ramp rate are in output rad/s and rad/s². POSITION uses
-`motor_torque = Kp * (target - position) + I - Kd * velocity`; VELOCITY uses
-`motor_torque = Kp * (target - velocity) + I`.
+ramp rate are in output rad/s and rad/s². The POSITION control law is
 
-Torque is limited by hardware, user output-shaft torque (converted through
-`gear`) and available current (including stall derating), with conditional
+$$
+\tau(t) = K_{p,p}\bigl(\theta_{\mathrm{ref}}(t)-\theta(t)\bigr)
++ K_{i,p}\int_{t_0}^{t}\bigl(\theta_{\mathrm{ref}}(t)-\theta(t)\bigr)\,dt
+- K_{d,p}\omega(t).
+$$
+
+The VELOCITY control law is
+
+$$
+\tau(t) = K_{p,v}\bigl(\omega_{\mathrm{ref}}(t)-\omega(t)\bigr)
++ K_{i,v}\int_{t_0}^{t}\bigl(\omega_{\mathrm{ref}}(t)-\omega(t)\bigr)\,dt.
+$$
+
+Here $\theta$ and $\omega$ are actual output-shaft position and velocity in user
+coordinates, references are the direct or generated targets, and $\tau$ is
+output-shaft torque. The subscripts $p$ and $v$ select the position and velocity
+gain registers. $t_0$ is the latest reset of the respective integral state.
+
+Torque is limited by rated and user output-shaft torque and available current
+(including stall derating), with conditional
 integration to prevent windup.
+
+Torque/current conversion uses $\tau = I_q K_t$ and $I_q = \tau/K_t$ for
+MIT, TORQUE_DIRECT, Servo output, current-derived torque limits and telemetry.
+`gear` does not enter these conversions; it still converts rotor position and
+velocity to output-shaft position and velocity. `kt` is specific to the complete
+motor/transmission assembly and must match this convention; stored values are
+not rescaled automatically.
 
 `POSITION_FILTER` smooths the position input with a critically damped second-order
 filter. Its effective bandwidth is capped at one quarter of the 5 kHz reference
@@ -121,6 +161,7 @@ All entries are non-persistent and readable without CONFIG. Writes are rejected.
 | --- | --- | --- |
 | `cmd_errors` | natural32 | Rejected Serial/Cyphal movement commands |
 | `firmware_rev` | string | Latest version tag (for example, `4.0.0`) |
+| `device` | string | Fixed device type: `vbdrive`, independent of writable `name` |
 | `bus_voltage` | real32 | Bus voltage, V |
 | `bus_current` | real32 | Working-current measurement, A; not a separate DC-link sensor |
 | `temp_mcu` | real32 | MCU temperature, K |
