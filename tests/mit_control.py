@@ -55,11 +55,16 @@ struct Motor {
 } device;
 Motor* motor=&device;
 Motor* get_motor() {return motor;}
+bool app_running=true;
+struct AppManager {bool is_app_running(){return app_running;}} manager;
+auto& get_app_manager(){return manager;}
 int errors=0;
 void record_invalid_command() {++errors;}
 '''+handler+servo_handler+r'''
 int main() {
     ServoSub servo_sub(0,3418);
+    app_running=false;assert(!apply_servo_command(0,0,false,0) && !apply_mit_command({}));
+    app_running=true;
     for (uint8_t type : {0,1,2,3,4,5,6,255}) {
         device=Motor{}; errors=0;
         voltbro_foc_Servo_1_0 command{};

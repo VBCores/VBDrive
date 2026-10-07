@@ -134,14 +134,14 @@ static void handle_parameter_register(
                     uint32_t unsigned_value = 0;
                     float real_value = 0;
                     if (parse_register_integer32(v_in, signed_value)) {
-                        requested = signed_value != 0;
-                        parsed = true;
+                        requested = signed_value == 1;
+                        parsed = signed_value == 0 || signed_value == 1;
                     } else if (parse_register_natural32(v_in, unsigned_value)) {
-                        requested = unsigned_value != 0;
-                        parsed = true;
+                        requested = unsigned_value == 1;
+                        parsed = unsigned_value == 0 || unsigned_value == 1;
                     } else if (parse_register_real32(v_in, real_value)) {
-                        requested = real_value != 0;
-                        parsed = true;
+                        requested = real_value == 1;
+                        parsed = real_value == 0 || real_value == 1;
                     }
                 }
                 break;

@@ -42,6 +42,7 @@ utils = (ROOT / "Drivers/libvoltbro/voltbro/utils.hpp").read_text()
 source += utils[utils.index("#define CRITICAL_SECTION"):utils.index("// TODO: add optional warning")]
 source += bldc[bldc.index("enum class SetPointType"):bldc.index("enum class DrivePhase")]
 source += foc[foc.index("struct FOCTarget"):foc.index("struct FiltersConfig")]
+source += function((ROOT / "App/config/config.hpp").read_text(), "constexpr int8_t vbdrive_direction_multiplier") + '\n'
 source += next(line + '\n' for line in foc.splitlines() if 'constexpr float MAX_BOARD_CURRENT' in line)
 source += '#include "voltbro/motors/bldc/foc/servo_control.hpp"\n'
 source += r'''
@@ -80,7 +81,7 @@ struct FOC : BLDCController {
     uint8_t servo_reference_ticks=0, servo_integral_ticks=0;
     bool servo_reference_initialize=false;
     FOCTarget foc_target;
-    PIDRegulator servo_pos_reg, servo_vel_reg;
+    PIDRegulator q_reg, d_reg, servo_pos_reg, servo_vel_reg;
     float servo_torque();
     float servo_period() {
         float result=0;
@@ -88,22 +89,27 @@ struct FOC : BLDCController {
         return result;
     }
 '''
-for name in ("void reset_control()", "bool set_foc_point(", "void reset_servo_input()", "bool set_servo_input_config(", "bool set_servo_command(", "PIDConfig get_servo_config(", "void update_servo_config("):
+for name in ("TrajectoryState servo_initial_state(", "void reset_control()", "bool set_foc_point(", "void reset_servo_input()", "bool set_servo_input_config(", "bool set_servo_command(", "PIDConfig get_servo_config(", "void update_servo_config("):
     source += function(foc, name) + "\n"
 source += "};\n" + function(implementation, "float FOC::servo_torque()")
 source += r'''
 using HAL_StatusTypeDef = int;
 constexpr int HAL_OK=0;
 unsigned HAL_GetTick() { return 100; }
-#define __HAL_TIM_MOE_DISABLE(timer) bridge_enabled=false
+// PWM channels remain enabled: the conditional HAL macro must NOT be used here.
+#define __HAL_TIM_MOE_DISABLE(timer) ((void)0)
+#define __HAL_TIM_MOE_DISABLE_UNCONDITIONALLY(timer) bridge_enabled=false
 #define __HAL_TIM_MOE_ENABLE(timer) bridge_enabled=true
 struct VBDrive : FOC {
     bool _is_on=false, bridge_enabled=false;
     unsigned bootstrap_charge_deadline_ms=0, bootstrap_charge_time_ms=2;
     struct Gate {
-        int request_standby() { return HAL_OK; }
-        int wake() { return HAL_OK; }
-        int clear_faults() { return HAL_OK; }
+        unsigned standby_requests=0;
+        int request_standby() { ++standby_requests; return HAL_OK; }
+        int wake_status=HAL_OK, clear_status=HAL_OK;
+        unsigned wake_calls=0;
+        int wake() { ++wake_calls;return wake_status; }
+        int clear_faults() { return clear_status; }
     } gate_driver;
     void force_bootstrap_charge() {}
     void quit_stall() {}
@@ -111,7 +117,21 @@ struct VBDrive : FOC {
 vbdrive = (BASE / "vbdrive/vbdrive.hpp").read_text()
 source += function(vbdrive, "HAL_StatusTypeDef stop() override")
 source += function(vbdrive, "HAL_StatusTypeDef start() override")
+source += function((BASE / "bldc.cpp").read_text(), "HAL_StatusTypeDef BLDCController::set_state(bool state)").replace("BLDCController::", "")
 source += "};\n"
+source += r'''
+enum class CommandState { RUNNING,NOT_CALIBRATED };
+struct CalibrationData { static constexpr unsigned TYPE_ID=1;unsigned type_id=1;bool was_calibrated=false; } calibration_data;
+struct {CommandState state=CommandState::RUNNING;void set_state(CommandState v){state=v;}} app_manager;
+auto& get_app_manager(){return app_manager;}
+struct {template<class T> int read(T*,unsigned){return 0;}} eeprom;
+constexpr unsigned CALIBRATION_PLACEMENT=0x100;
+#define HAL_IMPORTANT(expr) assert((expr)==0);
+void serial_send_message(const char*) {}
+struct CalibrationMotor : VBDrive {bool applied=false;void apply_calibration(CalibrationData&){applied=true;}} calibration_motor;
+CalibrationMotor* motor=&calibration_motor;
+'''
+source += function((ROOT / "App/app.cpp").read_text(), "void apply_calibration()") + "\n"
 current_conversion = next(line.strip() for line in implementation.splitlines()
                           if "i_q_set = controller_response" in line)
 source += r'''
@@ -345,11 +365,35 @@ int main() {
     rated_current.drive_runtime_config.current_limit=100;
     near(servo_current(rated_current),30); // Board cap applies even when rated/user limits are higher.
     near(integral(rated_current.servo_pos_reg),0);
+    // VBDrive public +1 selects CCW, opposite its CW-positive native frame.
+    for (int ang_dir : {-1,1}) {
+        FOC oriented;
+        oriented.drive_runtime_config.user_angle_direction=vbdrive_direction_multiplier(ang_dir);
+        near(oriented.get_direction_multiplier(),-ang_dir);
+        oriented.shaft_angle=.5f; oriented.shaft_velocity=.3f;
+        oriented.drive_runtime_config.user_angle_offset=.25f;
+        near(oriented.get_angle(),-.5f*ang_dir+.25f);
+        near(oriented.get_velocity(),-.3f*ang_dir);
+        near(reported_torque(oriented,1),-.5f*ang_dir);
+        assert(oriented.set_torque_point(.1f));
+        near(torque_current(oriented),-.2f*ang_dir);
+        near(reported_torque(oriented,torque_current(oriented)),.1f);
+        assert(oriented.set_voltage_point(1)); near(oriented.target,-ang_dir);
+        oriented.shaft_angle=oriented.shaft_velocity=0;
+        oriented.drive_runtime_config.user_angle_offset=0;
+        oriented.update_servo_config(SetPointType::POSITION,{.kp=1});
+        assert(oriented.set_angle_point(.1f)); near(servo_current(oriented),-.2f*ang_dir);
+        oriented.update_servo_config(SetPointType::VELOCITY,{.kp=1});
+        assert(oriented.set_velocity_point(.1f)); near(servo_current(oriented),-.2f*ang_dir);
+        assert(oriented.set_foc_point({.torque=.1f})); near(mit_current(oriented),-.2f*ang_dir);
+    }
     VBDrive device;
     device.update_servo_config(SetPointType::POSITION,{.kp=1,.ki=1});
     device.start(); device.set_angle_point(1); device.servo_period();
     assert(integral(device.servo_pos_reg)>0);
     device.stop(); assert(!device._is_on && !device.bridge_enabled);
+    assert(device.gate_driver.standby_requests==0);
+    device.stop(); assert(device.gate_driver.standby_requests==0);
     near(integral(device.servo_pos_reg),0); near(device.target,0);
     device.set_angle_point(2); // A target received while off must not resume on enable.
     device.start(); assert(device._is_on && device.bridge_enabled);
@@ -366,7 +410,7 @@ int main() {
     assert(std::get<FilterTrajectory>(*generated.servo_traj_generator).reference==reference);
     assert(!generated.set_servo_command(ServoControlType::POSITION_FILTER,2,true,7));
     assert(generated.set_servo_command(ServoControlType::POSITION_FILTER,2,true,8));
-    assert(std::get<FilterTrajectory>(*generated.servo_traj_generator).reference==reference);
+    near(std::get<FilterTrajectory>(*generated.servo_traj_generator).reference,.5f);
     input_config.input_bandwidth=0;
     assert(!generated.set_servo_input_config(input_config));
     generated.reset_servo_input();
@@ -428,13 +472,13 @@ int main() {
         assert(racing.set_servo_command(type,1));
         interrupted_motor=&racing; irq_hook=foc_interrupt;
         assert(racing.set_servo_command(type,2));
-        assert(std::visit([](const auto& g){return g.reference;},*racing.servo_traj_generator)>0);
+        assert(racing.target>0);
         assert(racing.servo_reference_ticks==7); // ISR's phase survives too.
-        const float previous_ref=std::visit([](const auto& g){return g.reference;},*racing.servo_traj_generator);
+        const float previous_ref=racing.target;
         racing.servo_reference_ticks=0;
         irq_hook=foc_interrupt;
         assert(racing.set_servo_input_config({.input_bandwidth=30,.velocity_ramp_rate=3}));
-        assert(std::visit([](const auto& g){return g.reference;},*racing.servo_traj_generator)>previous_ref);
+        assert(racing.target>previous_ref);
         assert(racing.servo_reference_ticks==7);
 
     }
@@ -468,6 +512,107 @@ int main() {
     do { ++wrapped.control_tick; wrapped.servo_torque(); } while(wrapped.servo_reference_ticks!=7);
     near(std::get<PolyTrajectory>(*wrapped.servo_traj_generator).elapsed,
          (wrapped.control_tick-config_epoch+8)*wrapped.T,1e-8f);
+
+    // Use the last planner velocity literally; position is always measured.
+    FOC planning;
+    planning.servo_input_config={.input_bandwidth=10,.velocity_limit=1,.acceleration_limit=2,
+                                .deceleration_limit=2,.velocity_planning_tolerance=.5f};
+    planning.shaft_angle=.2f;planning.shaft_velocity=.1f;
+    auto initial=planning.servo_initial_state(.5f);
+    near(initial.position,.2f);near(initial.velocity,.1f); // No previous planner.
+    assert(planning.set_servo_command(POSITION_POLY,1));
+    std::get<PolyTrajectory>(*planning.servo_traj_generator).velocity=.4f;
+    assert(planning.set_servo_command(POSITION_POLY,2));
+    near(std::get<PolyTrajectory>(*planning.servo_traj_generator).reference,.2f);
+    near(std::get<PolyTrajectory>(*planning.servo_traj_generator).velocity,.4f);
+    std::get<PolyTrajectory>(*planning.servo_traj_generator).velocity=.6f;
+    near(planning.servo_initial_state(.5f).velocity,.6f); // Inclusive boundary.
+    std::get<PolyTrajectory>(*planning.servo_traj_generator).velocity=.6001f;
+    near(planning.servo_initial_state(.5f).velocity,.1f); // Outside tolerance.
+    assert(planning.set_servo_command(POSITION_FILTER,1));
+    near(std::get<FilterTrajectory>(*planning.servo_traj_generator).reference,.2f);
+    near(std::get<FilterTrajectory>(*planning.servo_traj_generator).velocity,.1f);
+    std::get<FilterTrajectory>(*planning.servo_traj_generator).velocity=.4f;
+    auto configured=planning.servo_input_config;configured.input_bandwidth=20;
+    assert(planning.set_servo_input_config(configured));
+    near(std::get<FilterTrajectory>(*planning.servo_traj_generator).reference,.2f);
+    near(std::get<FilterTrajectory>(*planning.servo_traj_generator).velocity,.4f);
+    configured.velocity_planning_tolerance=0;
+    assert(planning.set_servo_input_config(configured));
+    near(std::get<FilterTrajectory>(*planning.servo_traj_generator).velocity,.1f);
+    for(float invalid:{-1.f,NAN,INFINITY}) {
+        auto bad=configured;bad.velocity_planning_tolerance=invalid;
+        assert(!planning.set_servo_input_config(bad));
+        near(std::get<FilterTrajectory>(*planning.servo_traj_generator).velocity,.1f);
+    }
+    planning.reset_servo_input();near(planning.servo_initial_state(.5f).velocity,.1f);
+    // Same units/signs as command and telemetry, including direction and offset.
+    for(int direction:{-1,1}) {
+        planning.drive_runtime_config.user_angle_direction=direction;
+        planning.drive_runtime_config.user_angle_offset=.25f;
+        planning.shaft_angle=.1f*direction;planning.shaft_velocity=.1f*direction;
+        planning.servo_input_config.velocity_planning_tolerance=.5f;
+        assert(planning.set_servo_command(POSITION_POLY,1));
+        std::get<PolyTrajectory>(*planning.servo_traj_generator).velocity=.4f;
+        assert(planning.set_servo_command(POSITION_POLY,2));
+        near(std::get<PolyTrajectory>(*planning.servo_traj_generator).reference,.35f);
+        near(std::get<PolyTrajectory>(*planning.servo_traj_generator).velocity,.4f);
+        planning.set_foc_point({});near(planning.servo_initial_state(.5f).velocity,.1f);
+    }
+    FOC stream;
+    stream.servo_input_config={.velocity_limit=1,.acceleration_limit=2,.deceleration_limit=2,
+                              .velocity_planning_tolerance=2};
+    for(int command=0;command<500;++command) {
+        assert(stream.set_servo_command(POSITION_POLY,1+float(command)*.00001f));
+        for(int tick=0;tick<40;++tick){++stream.control_tick;stream.servo_torque();}
+    }
+    near(std::get<PolyTrajectory>(*stream.servo_traj_generator).velocity,1,.002f);
+    assert(stream.target>0);
+
+    // Idempotent is_on for all Servo modes and MIT; off/on starts neutral with fresh PI state.
+    VBDrive enabled;
+    enabled.servo_input_config={.input_bandwidth=10,.velocity_limit=1,.acceleration_limit=2,
+                               .deceleration_limit=2,.velocity_ramp_rate=2};
+    for(int mode=0;mode<8;++mode) {
+        assert(enabled.set_state(true)==HAL_OK && enabled._is_on && enabled.bridge_enabled);
+        if(mode==7)assert(enabled.set_foc_point({.angle=.1f,.torque=.05f,.angle_kp=2}));
+        else assert(enabled.set_servo_command(mode,.1f,true,10));
+        enabled.q_reg.set_integral_error(.7f);enabled.d_reg.set_integral_error(.6f);
+        const auto kind=enabled.point_type;const auto setpoint=enabled.target;
+        const auto command=enabled.servo_command;const auto wake_calls=enabled.gate_driver.wake_calls;
+        assert(enabled.set_state(true)==HAL_OK);
+        assert(enabled.point_type==kind && enabled.target==setpoint);
+        assert(enabled.gate_driver.wake_calls==wake_calls);
+        assert(enabled.servo_command.has_value()==command.has_value());
+        near(enabled.q_reg.get_integral_error(),.7f);near(enabled.d_reg.get_integral_error(),.6f);
+        if(mode==7)near(enabled.foc_target.torque,.05f);
+        assert(enabled.set_state(false)==HAL_OK && !enabled._is_on && !enabled.bridge_enabled);
+        assert(!enabled.servo_command && !enabled.servo_traj_generator);
+        near(enabled.target,0);near(enabled.foc_target.torque,0);
+        near(enabled.q_reg.get_integral_error(),0);near(enabled.d_reg.get_integral_error(),0);
+        assert(enabled.set_state(false)==HAL_OK && !enabled._is_on && !enabled.bridge_enabled);
+        // Targets accepted while off never execute on re-enable without a new command.
+        assert(enabled.set_servo_command(mode<7 ? mode : POSITION_POLY,.2f));
+        assert(enabled.set_state(true)==HAL_OK);
+        assert(enabled.point_type==SetPointType::VOLTAGE && enabled.target==0);
+        assert(!enabled.servo_command && !enabled.servo_traj_generator);
+        enabled.set_state(false);
+    }
+    enabled.set_state(true);
+    enabled.gate_driver.wake_status=1;
+    assert(enabled.start()==1 && !enabled._is_on && !enabled.bridge_enabled);
+    enabled.gate_driver.wake_status=0;enabled.gate_driver.clear_status=1;
+    assert(enabled.start()==1 && !enabled._is_on && !enabled.bridge_enabled);
+    assert(enabled.bootstrap_charge_deadline_ms==0);
+    enabled.gate_driver.clear_status=0;
+    assert(enabled.set_state(true)==HAL_OK && enabled._is_on && enabled.bridge_enabled);
+    enabled.set_state(false);
+    calibration_motor.set_state(true);calibration_data.was_calibrated=false;
+    apply_calibration();assert(!calibration_motor._is_on && !calibration_motor.bridge_enabled);
+    assert(app_manager.state==CommandState::NOT_CALIBRATED && !calibration_motor.applied);
+    calibration_data.was_calibrated=true;calibration_motor.set_state(true);
+    apply_calibration();assert(calibration_motor._is_on && calibration_motor.applied);
+    calibration_motor.set_state(false);
     puts("Servo numerical and command-state checks passed");
 }
 '''

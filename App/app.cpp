@@ -142,7 +142,7 @@ void create_motor(VBDriveConfig& config_data) {
             .user_position_lower_limit = value_or_default(config_data.min_angle, NAN),
             .user_position_upper_limit = value_or_default(config_data.max_angle, NAN),
             .user_angle_offset = value_or_default(config_data.angle_offset, parameter_default<float>(ParameterId::ANG_OFF)),
-            .user_angle_direction = config_data.angle_direction == -1 ? int8_t(-1) : int8_t(1)
+            .user_angle_direction = vbdrive_direction_multiplier(config_data.angle_direction)
         },
         // Built-in constant parameters
         DriveInfo {
@@ -220,6 +220,7 @@ void apply_calibration() {
         char warning_message[] = "Motor is not calibrated! Movement forbidden\n\r\0";
         serial_send_message(warning_message);
         app_manager.set_state(CommandState::NOT_CALIBRATED);
+        motor->stop();
         return;
     }
     motor->apply_calibration(calibration_data);
@@ -276,9 +277,9 @@ void app() {
     HAL_TIM_Base_Start_IT(&htim4);
 
     while(true) {
-        if (app_manager.is_app_running()) cyphal_loop();
+        cyphal_loop();
         process_serial();
-        if (app_manager.is_app_running()) get_app_manager().persist_pending_config();
+        get_app_manager().persist_pending_config();
         reboot_to_bootloader_if_requested();
 
         millis current_time = millis_32();

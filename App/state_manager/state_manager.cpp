@@ -16,6 +16,17 @@ CommandState DriveStateController::get_state() const { return app_state; }
 bool DriveStateController::is_app_running() const { return app_state == CommandState::RUNNING; }
 bool DriveStateController::is_logging() const { return is_app_running() && logging; }
 
+ParameterWriteResult DriveStateController::set_motor_enabled(bool enabled) {
+    auto motor = get_motor();
+    if (!motor) return ParameterWriteResult::UNAVAILABLE;
+    if (enabled && !is_app_running()) return ParameterWriteResult::INVALID;
+    if (!enabled) {
+        if (configs.is_editing()) restore_motor_enable = false;
+        motor->reset_servo_input();
+    }
+    return motor->set_state(enabled) == HAL_OK ? ParameterWriteResult::OK : ParameterWriteResult::INVALID;
+}
+
 void DriveStateController::set_state(CommandState state) {
     if (state != CommandState::RUNNING) logging = false;
     app_state = state;
@@ -107,7 +118,7 @@ void DriveStateController::process_command(std::string_view command, UARTRespons
         if (!definition) error = "Unknown parameter";
         else if (!definition->is_mutable) error = "Read-only parameter";
         else if (definition->is_persistent && !configs.is_editing()) error = "CONFIG mode required";
-        else if (definition->id == ParameterId::IS_ON && !is_app_running()) error = "RUNNING mode required";
+        else if (definition->id == ParameterId::IS_ON && value == "1" && !is_app_running()) error = "RUNNING mode required";
         if (error) {
             responses.append("%.*s ERROR: %s\r\n", int(param.size()), param.data(), error);
             return;
@@ -126,7 +137,11 @@ void DriveStateController::process_command(std::string_view command, UARTRespons
             state_before_config = app_state;
             configs.begin();
             set_state(CommandState::CONFIG);
-            if (auto motor = get_motor()) motor->stop();
+            restore_motor_enable = false;
+            if (auto motor = get_motor()) {
+                restore_motor_enable = motor->is_on();
+                motor->stop();
+            }
         }
         responses.append("CONFIG OK: mode enabled\r\n");
         return;
@@ -134,7 +149,12 @@ void DriveStateController::process_command(std::string_view command, UARTRespons
     if (command == "EXIT" && configs.is_editing()) {
         configs.discard();
         set_state(state_before_config);
-        if (is_app_running()) if (auto motor = get_motor()) motor->start();
+        if (is_app_running() && restore_motor_enable) {
+            if (set_motor_enabled(true) != ParameterWriteResult::OK) {
+                responses.append("EXIT ERROR: driver enable failed; changes discarded\r\n");
+                return;
+            }
+        }
         responses.append("EXIT OK: changes discarded\r\n");
         return;
     }
@@ -154,8 +174,13 @@ void DriveStateController::process_command(std::string_view command, UARTRespons
         } else {
             if (!configs.commit()) Error_Handler();
             set_state(CommandState::RUNNING);
-            if (auto motor = get_motor()) motor->start();
             configs.get_config().app.apply_servo_config();
+            if (restore_motor_enable) {
+                if (set_motor_enabled(true) != ParameterWriteResult::OK) {
+                    responses.append("SAVE ERROR: driver enable failed; config saved\r\n");
+                    return;
+                }
+            }
             responses.append("SAVE OK: config saved; run APPLY to activate\r\n");
         }
         return;
@@ -164,11 +189,13 @@ void DriveStateController::process_command(std::string_view command, UARTRespons
 }
 
 bool apply_mit_command(FOCTarget target) {
+    if (!get_app_manager().is_app_running()) return false;
     auto motor = get_motor();
     return motor && motor->set_foc_point(std::move(target));
 }
 
 bool apply_servo_command(uint8_t type, float value, bool indexed, uint8_t index) {
+    if (!get_app_manager().is_app_running()) return false;
     auto motor = get_motor();
     if (!motor) return false;
     const bool accepted = motor->set_servo_command(type, value, indexed, index);

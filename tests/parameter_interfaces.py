@@ -111,8 +111,9 @@ struct VBDrive {
     // Production command/configuration methods are injected here below.
     __PRODUCTION_SERVO_METHODS__
     bool on=true;
+    unsigned starts=0;int start_result=0;
     int stop() {on=false;return 0;}
-    int start() {on=true;return 0;}
+    int start() {++starts;on=start_result==0;return start_result;}
     float get_angle() const {return 0;}
     float get_velocity() const {return 0;}
     float get_torque() const {return 0;}
@@ -121,7 +122,7 @@ struct VBDrive {
     FOCTarget target;
     auto get_runtime_config() const { return limits; }
     bool set_runtime_config(DriveRuntimeConfig v) { if (v.user_current_limit < 0) return false; limits=v; return true; }
-    int set_state(bool v) {on=v;return 0;}
+    int set_state(bool v) {if (on==v)return 0;return v ? start() : stop();}
     bool is_on() const {return on;}
     auto& get_inverter() const {return inverter;}
     float get_voltage() const {return 24;}
@@ -153,7 +154,7 @@ def extract_function(text, signature):
 
 foc_header=(ROOT/'Drivers/libvoltbro/voltbro/motors/bldc/foc/foc.hpp').read_text()
 methods='\n'.join(extract_function(foc_header, sig) for sig in
-                  ('void reset_servo_input()', 'bool set_servo_input_config(', 'bool set_servo_command('))
+                  ('TrajectoryState servo_initial_state(', 'void reset_servo_input()', 'bool set_servo_input_config(', 'bool set_servo_command('))
 methods=methods.replace('bool set_servo_command(', 'bool set_servo_command_impl(').replace('target =', 'servo_target =')
 STUB=STUB.replace('__PRODUCTION_SERVO_METHODS__', methods).replace('#include <voltbro/utils.hpp>', '#include <voltbro/utils.hpp>\n#include <voltbro/profiling.hpp>')
 
@@ -175,7 +176,7 @@ int main() {
         assert(uart_frames.size()==100);
         for (const auto& frame : uart_frames) assert(frame=="line\r\n");
     }
-    static_assert(sizeof(BaseConfigData)==28 && sizeof(VBDriveConfig)==118 && sizeof(DriveConfig)==146);
+    static_assert(sizeof(BaseConfigData)==28 && sizeof(VBDriveConfig)==122 && sizeof(DriveConfig)==150);
     static_assert(CONFIG_PLACEMENT==0 && CALIBRATION_PLACEMENT==0x100);
     auto& config = manager.get_config();
     for (const auto& definition : PARAMETER_CATALOG) {
@@ -302,7 +303,8 @@ int main() {
     uavcan_register_Value_1_0 input{};
     const int before_node_write=eeprom.writes; fill_register_integer32(input,12); access("node_id",input); assert(config.base.node_id==12 && eeprom.writes==before_node_write);
     int saved=eeprom.writes; manager.persist_pending_config(); assert(eeprom.writes==saved+1);
-    fill_register_integer32(input,-1); access("ang_dir",input); assert(config.app.angle_direction==-1 && device.limits.user_angle_direction==-1);
+    fill_register_integer32(input,-1); access("ang_dir",input); assert(config.app.angle_direction==-1 && device.limits.user_angle_direction==1);
+    fill_register_integer32(input,1); access("ang_dir",input); assert(config.app.angle_direction==1 && device.limits.user_angle_direction==-1);
     for (const auto& d:PARAMETER_CATALOG) {
         if (!d.is_persistent) continue;
         if (d.type==ParameterType::REAL32) fill_register_real32(input,1);
@@ -580,7 +582,61 @@ int main() {
     assert(device.velocity.kp==0 && device.velocity.ki==0);
     ParameterValue zero_value;
     assert(read_parameter(zero,ParameterId::SERVO_POS_P_GAIN,zero_value) && std::get<float>(zero_value)==0);
-    puts("PASS: 47 shared registers, Serial/Cyphal isolation, device readonly, persistent ratings, Servo apply and persistence, boot commands");
+    // Planning tolerance is shared, persistent, live on SAVE/Cyphal, and NaN restores its default.
+    manager.set_state(CommandState::RUNNING);
+    command("STOP");
+    assert(command("velocity_planning_tolerance:1").find("CONFIG mode required")!=std::string::npos);
+    command("CONFIG");
+    assert(command("velocity_planning_tolerance:1.25").find(" OK")!=std::string::npos);
+    for (auto bad : {"-1", "inf", "-inf"}) {
+        assert(command(std::string("velocity_planning_tolerance:")+bad).find("Invalid value")!=std::string::npos);
+        assert(config.app.velocity_planning_tolerance==1.25f);
+    }
+    assert(command("SAVE").starts_with("SAVE OK"));
+    assert(device.servo_input_config.velocity_planning_tolerance==1.25f);
+    eeprom.read(&loaded,0);assert(loaded.app.velocity_planning_tolerance==1.25f);
+    fill_register_real32(input,.75f);
+    auto tolerance_response=access("velocity_planning_tolerance",input);
+    assert(tolerance_response.real32.value.elements[0]==.75f);
+    assert(device.servo_input_config.velocity_planning_tolerance==.75f);
+    manager.persist_pending_config();eeprom.read(&loaded,0);assert(loaded.app.velocity_planning_tolerance==.75f);
+    command("CONFIG");assert(command("velocity_planning_tolerance:nan").find(" OK")!=std::string::npos);
+    command("SAVE");
+    assert(command("velocity_planning_tolerance:?").find("0.500000")!=std::string::npos);
+    assert(device.servo_input_config.velocity_planning_tolerance==.5f);
+    eeprom.read(&loaded,0);assert(std::isnan(loaded.app.velocity_planning_tolerance));
+
+    // Shared enable semantics across command states/transports and config transactions.
+    for(auto state:{CommandState::INIT,CommandState::CONFIG,CommandState::NOT_CALIBRATED,CommandState::CALIBRATING}) {
+        manager.set_state(state);device.on=false;
+        assert(command("is_on:1").find("RUNNING mode required")!=std::string::npos);
+        fill_register_bit(input,true);access("is_on",input);assert(!device.on);
+        assert(command("is_on:0")=="is_on:0 OK\r\n");
+        device.on=true;fill_register_bit(input,false);access("is_on",input);assert(!device.on);
+    }
+    manager.set_state(CommandState::RUNNING);
+    for(float bad:{-1.f,2.f,NAN,INFINITY,-INFINITY}) {
+        fill_register_real32(input,bad);access("is_on",input);assert(!device.on);
+        fill_register_integer32(input,-1);access("is_on",input);assert(!device.on);
+        fill_register_natural32(input,2);access("is_on",input);assert(!device.on);
+    }
+    fill_register_integer32(input,1);access("is_on",input);assert(device.on);
+    unsigned starts=device.starts;command("is_on:1");assert(device.starts==starts);
+    for(auto ending:{"EXIT","SAVE"}) {
+        for(bool enabled:{false,true}) {
+            command(enabled ? "is_on:1" : "is_on:0");command("CONFIG");assert(!device.on);
+            command("CONFIG"); // Repeated CONFIG must retain the original enable snapshot.
+            assert(command(ending).find(" OK")!=std::string::npos);assert(device.on==enabled);
+        }
+        command("is_on:1");command("CONFIG");command("is_on:0");command(ending);assert(!device.on);
+        command("is_on:1");command("CONFIG");
+        fill_register_bit(input,false);access("is_on",input);command(ending);assert(!device.on);
+        command("is_on:1");command("CONFIG");device.start_result=1;
+        assert(command(ending).find("ERROR: driver enable failed")!=std::string::npos);
+        assert(!device.on);device.start_result=0;
+    }
+    command("is_on:0");
+    puts("PASS: 48 shared registers, planning tolerance persistence/validation, Serial/Cyphal isolation, Servo apply and boot commands");
 }
 '''
 

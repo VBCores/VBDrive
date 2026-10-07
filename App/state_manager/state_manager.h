@@ -13,6 +13,7 @@ class DriveStateController {
     DriveConfigManager configs;
     CommandState app_state = CommandState::INIT;
     CommandState state_before_config = CommandState::INIT;
+    bool restore_motor_enable = false;
     bool logging = false;
 
 public:
@@ -25,6 +26,7 @@ public:
     void set_state(CommandState state);
     bool is_app_running() const;
     bool is_logging() const;
+    ParameterWriteResult set_motor_enabled(bool enabled);
     void mark_config_changed();
     void persist_pending_config();
     [[gnu::cold]] void process_command(std::string_view command);

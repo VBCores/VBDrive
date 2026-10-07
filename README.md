@@ -6,7 +6,7 @@
 
 ## Configuration and Control Registers (Serial and Cyphal)
 
-All 47 registers are shared. The following configuration registers are read/write
+All 48 registers are shared. The following configuration registers are read/write
 and persistent; runtime controls `is_on` and `bootloader` are marked separately.
 
 | Parameter | Description | Type | Default |
@@ -19,7 +19,7 @@ and persistent; runtime controls `is_on` and `bootloader` are marked separately.
 | `rated_max_torque` | Rated output-shaft torque limit (`DriveInfo.max_torque`), N m | Float | `30.0` |
 | `rated_max_current` | Rated current limit (`DriveInfo.max_current`), A | Float | `30.0` |
 | `ang_off` | Joint angle offset (rad) | Float | `0.0` |
-| `ang_dir` | Joint angle direction multiplier, -1 or +1 | Integer | `1` |
+| `ang_dir` | Positive joint direction: +1 CCW, -1 CW | Integer | `1` |
 | `min_ang` | Minimum allowed angle (rad) | Float | `NaN` |
 | `max_ang` | Maximum allowed angle (rad) | Float | `NaN` |
 | `kt` | Output-shaft torque per ampere (Nm/A) | Float | `1.0` |
@@ -61,14 +61,21 @@ can only reduce the effective current limit. Both Servo saturation and final
 FOC current clipping also enforce `MAX_BOARD_CURRENT = 30 A`, independently of
 the configured rated/user limits.
 
-The application configuration uses type ID `0x44AAAC03` (118 bytes), following
+The application configuration uses type ID `0x44AAAC04` (122 bytes), following
 the 28-byte common block. There is no automatic migration from other application
 schemas; preserve and restore settings when updating firmware across schemas.
 
 | Runtime control | Type | Access | Persistent | Meaning |
 | --- | --- | --- | --- | --- |
-| `is_on` | bit | read/write | no | Enable driver; Serial accepts 0/1 in RUNNING |
+| `is_on` | bit | read/write | no | Enable driver; 1 requires RUNNING, 0 disables in any command state |
 | `bootloader` | bit | read/write | no | 1 requests VBBoot; 0 is a no-op, not cancellation |
+
+`is_on` is a runtime software-enable flag, not a power-supply or hardware-fault
+indicator. `0` disables bridge PWM, clears control targets/trajectory history and
+current-controller integrals, while MCU power remains active. Position/velocity sensing continues in RUNNING. It permits coasting; it does not brake or hold position.
+`1` enables the bridge with a neutral target; a new motion command is required.
+Repeated `1` while enabled preserves the active mode and target. Commands
+received while disabled never resume automatically on enable.
 
 ### Servo Parameters
 
@@ -86,6 +93,7 @@ Servo parameters are shared Serial/Cyphal read/write persistent registers:
 | `servo_control_accel_limit` | real32 | 0 |
 | `servo_control_decel_limit` | real32 | 0 |
 | `servo_control_vel_ramp_rate` | real32 | 0 |
+| `velocity_planning_tolerance` | real32 | 0.5 |
 
 Gains must be finite and non-negative. Generator parameters accept finite
 non-negative values; `NaN` restores the default zero. A generator command
@@ -124,12 +132,24 @@ not rescaled automatically.
 
 `POSITION_FILTER` smooths the position input with a critically damped second-order
 filter. Its effective bandwidth is capped at one quarter of the 5 kHz reference
-update rate (1250 s^-1). `POSITION_POLY` plans a trapezoidal velocity profile from the measured
-position and velocity to the goal with zero final velocity; short moves have a
+update rate (1250 s^-1). `POSITION_POLY` plans a trapezoidal velocity profile
+to the goal with zero final velocity; short moves have a
 triangular velocity profile. `VELOCITY_RAMP` limits the change of velocity input
 per second. These modes shape the input of the existing Servo PID; its feedback
 does not alter the generated reference. Limits govern the reference, not actual
 motor motion. Configuration changes take effect immediately.
+
+On each new FILTER/POLY command or generator-configuration change, planning starts
+from the **measured output-shaft position**. Its initial velocity is the last
+velocity returned by the active trajectory generator if it differs from measured
+velocity by no more than `velocity_planning_tolerance`; otherwise measured
+velocity is used. If no generator is available, measured velocity is used.
+The tolerance is in output rad/s, accepts finite non-negative values, and `NaN`
+restores 0.5 rad/s. The comparison is inclusive; zero requires matching velocities.
+No time resampling or reconstruction of the previous profile is performed.
+Between commands, generation uses only its prepared state and time. Duplicate
+commands do not reinitialize either mode.
+
 
 > Servo control IDs are:
 >
@@ -145,9 +165,9 @@ The Servo wire format contains `control_type`, `set_point_value` and an
 optional one-byte `command_idx`.
 An absent index deduplicates consecutive identical commands. With an index,
 repeating the index with changed type/value is invalid and increments
-`cmd_errors`; a changed index starts a new command. Only POSITION_POLY replans
-from measurements when a new command arrives. FILTER and RAMP continue their
-reference; STOP, disable, MIT and calibration reset command history.
+`cmd_errors`; a changed index starts a new command. New FILTER/POLY commands initialize from measured position and the velocity-selection
+rule above. RAMP continues its velocity reference. STOP, disable, MIT and
+calibration reset command history.
 At high command rates the three-frame FDCAN receive FIFO uses overwrite mode,
 so a full FIFO retains the newest frames. The firmware keeps no second command queue.
 
@@ -345,7 +365,11 @@ setup node ID derived from the MCU UID.
 
 Control positions and velocities over Serial and Cyphal use the corrected joint frame:
 
-* `reported_angle = measured_shaft_angle * ang_dir + ang_off`
+`ang_dir=+1` selects positive CCW motion; `ang_dir=-1` selects positive CW
+motion. The native VBDrive frame is CW-positive, so commands and reported
+position, velocity and torque all use the multiplier `-ang_dir`.
+
+* `reported_angle = measured_shaft_angle * (-ang_dir) + ang_off`
 * `voltbro.foc.MIT.pos`/`vel`, `voltbro.foc.Servo` position/velocity targets, `min_ang`, and `max_ang` are all interpreted in that corrected frame
 * MIT position, velocity and feedforward torque terms are converted together to the physical motor direction
 * Positive `ang_off` increases the reported and commanded joint angle for the same physical shaft position
@@ -358,9 +382,9 @@ Cyphal register writes apply at runtime and persist to EEPROM.
 ### **Calibration Workflow**
 
 1. Move the joint to the desired mechanical zero.
-2. Read the measured joint angle.
+2. Read the reported joint angle and current `ang_off`.
 3. Compute the required offset so the reported angle becomes zero:
-   `ang_off = -measured_shaft_angle * ang_dir`
+   `new_ang_off = current_ang_off - reported_angle`
 4. Write `ang_off` via `uavcan.register.Access`.
 5. Read back `ang_off`, `min_ang`, and `max_ang` to confirm the corrected frame.
 6. Set `min_ang` and `max_ang` in the same corrected frame.

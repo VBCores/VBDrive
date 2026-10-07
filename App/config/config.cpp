@@ -1,6 +1,7 @@
 #include "main.h"
 #include "app.h"
 #include "config.hpp"
+#include "state_manager/state_manager.h"
 #include <voltbro/motors/bldc/vbdrive/vbdrive.hpp>
 #include <cmath>
 
@@ -38,6 +39,7 @@ bool read_parameter(const DriveConfig& data, ParameterId id, ParameterValue& val
         case ParameterId::SERVO_CONTROL_ACCEL_LIMIT: value = value_or_default(config.servo_control_accel_limit, parameter_default<float>(ParameterId::SERVO_CONTROL_ACCEL_LIMIT)); return true;
         case ParameterId::SERVO_CONTROL_DECEL_LIMIT: value = value_or_default(config.servo_control_decel_limit, parameter_default<float>(ParameterId::SERVO_CONTROL_DECEL_LIMIT)); return true;
         case ParameterId::SERVO_CONTROL_VEL_RAMP_RATE: value = value_or_default(config.servo_control_vel_ramp_rate, parameter_default<float>(ParameterId::SERVO_CONTROL_VEL_RAMP_RATE)); return true;
+        case ParameterId::VELOCITY_PLANNING_TOLERANCE: value = value_or_default(config.velocity_planning_tolerance, parameter_default<float>(ParameterId::VELOCITY_PLANNING_TOLERANCE)); return true;
         case ParameterId::ANG_DIR:
             value.emplace<int32_t>(config.angle_direction == -1 ? -1 : 1);
             return true;
@@ -198,7 +200,8 @@ bool read_parameter(const DriveConfig& data, ParameterId id, ParameterValue& val
         memcpy(base.name, name.data(), name.size());
         return ParameterWriteResult::OK;
     }
-    if (id >= ParameterId::SERVO_POS_P_GAIN && id <= ParameterId::SERVO_CONTROL_VEL_RAMP_RATE) {
+    if ((id >= ParameterId::SERVO_POS_P_GAIN && id <= ParameterId::SERVO_CONTROL_VEL_RAMP_RATE) ||
+        id == ParameterId::VELOCITY_PLANNING_TOLERANCE) {
         const float gain = std::get<float>(value);
         const bool generator_parameter = id >= ParameterId::SERVO_CONTROL_INPUT_BANDWITH;
         if ((!std::isfinite(gain) && !(generator_parameter && std::isnan(gain))) || gain < 0) {
@@ -212,6 +215,7 @@ bool read_parameter(const DriveConfig& data, ParameterId id, ParameterValue& val
                 case ParameterId::SERVO_CONTROL_ACCEL_LIMIT: candidate.servo_control_accel_limit = gain; break;
                 case ParameterId::SERVO_CONTROL_DECEL_LIMIT: candidate.servo_control_decel_limit = gain; break;
                 case ParameterId::SERVO_CONTROL_VEL_RAMP_RATE: candidate.servo_control_vel_ramp_rate = gain; break;
+                case ParameterId::VELOCITY_PLANNING_TOLERANCE: candidate.velocity_planning_tolerance = gain; break;
                 default: break;
             }
             if (apply_runtime) {
@@ -259,7 +263,7 @@ bool read_parameter(const DriveConfig& data, ParameterId id, ParameterValue& val
         }
         limits = motor->get_runtime_config();
         switch (id) {
-            case ParameterId::ANG_DIR: limits.user_angle_direction = static_cast<int8_t>(std::get<int32_t>(value)); changes_limits = true; break;
+            case ParameterId::ANG_DIR: limits.user_angle_direction = vbdrive_direction_multiplier(std::get<int32_t>(value)); changes_limits = true; break;
             case ParameterId::MAX_I:   limits.user_current_limit = std::get<float>(value); changes_limits = true; break;
             case ParameterId::MAX_SPD: limits.user_speed_limit = std::get<float>(value); changes_limits = true; break;
             case ParameterId::MAX_TQ:  limits.user_torque_limit = std::get<float>(value); changes_limits = true; break;
@@ -326,13 +330,7 @@ ParameterWriteResult write_runtime_parameter(ParameterId id, const ParameterValu
     if (id != ParameterId::IS_ON) {
         return ParameterWriteResult::READ_ONLY;
     }
-    auto motor = get_motor();
-    if (!motor) {
-        return ParameterWriteResult::UNAVAILABLE;
-    }
-    const bool enabled = std::get<bool>(value);
-    if (!enabled) motor->reset_servo_input();
-    return motor->set_state(enabled) == HAL_OK ? ParameterWriteResult::OK : ParameterWriteResult::INVALID;
+    return get_app_manager().set_motor_enabled(std::get<bool>(value));
 }
 
 bool VBDriveConfig::are_required_params_set(const BaseConfigData& base) const {
@@ -345,7 +343,8 @@ ServoInputConfig VBDriveConfig::servo_input_config() const {
         .velocity_limit = value_or_default(servo_control_vel_limit, parameter_default<float>(ParameterId::SERVO_CONTROL_VEL_LIMIT)),
         .acceleration_limit = value_or_default(servo_control_accel_limit, parameter_default<float>(ParameterId::SERVO_CONTROL_ACCEL_LIMIT)),
         .deceleration_limit = value_or_default(servo_control_decel_limit, parameter_default<float>(ParameterId::SERVO_CONTROL_DECEL_LIMIT)),
-        .velocity_ramp_rate = value_or_default(servo_control_vel_ramp_rate, parameter_default<float>(ParameterId::SERVO_CONTROL_VEL_RAMP_RATE))
+        .velocity_ramp_rate = value_or_default(servo_control_vel_ramp_rate, parameter_default<float>(ParameterId::SERVO_CONTROL_VEL_RAMP_RATE)),
+        .velocity_planning_tolerance = value_or_default(velocity_planning_tolerance, parameter_default<float>(ParameterId::VELOCITY_PLANNING_TOLERANCE))
     };
 }
 

@@ -67,7 +67,8 @@ enum class ParameterId : uint8_t {
     SERIAL_BAUD,
     DEVICE,
     RATED_MAX_TORQUE,
-    RATED_MAX_CURRENT
+    RATED_MAX_CURRENT,
+    VELOCITY_PLANNING_TOLERANCE
 };
 
 using ParameterValue = std::variant<uint32_t, int32_t, float, bool, std::string_view>;
@@ -90,7 +91,7 @@ enum class ParameterWriteResult : uint8_t {
     UNAVAILABLE
 };
 
-inline constexpr std::array<ParameterDefinition, 47> PARAMETER_CATALOG{{
+inline constexpr std::array<ParameterDefinition, 48> PARAMETER_CATALOG{{
     {ParameterId::GEAR,          "gear",          ParameterType::NATURAL32, true,  true, ParameterValue{uint32_t{36}}},
     {ParameterId::MAX_I,         "max_i",         ParameterType::REAL32,    true,  true, ParameterValue{float{NAN}}},
     {ParameterId::MAX_SPD,       "max_spd",       ParameterType::REAL32,    true,  true, ParameterValue{float{NAN}}},
@@ -138,6 +139,7 @@ inline constexpr std::array<ParameterDefinition, 47> PARAMETER_CATALOG{{
     {ParameterId::DEVICE, "device", ParameterType::STRING, false, false, std::nullopt},
     {ParameterId::RATED_MAX_TORQUE, "rated_max_torque", ParameterType::REAL32, true, true, ParameterValue{float{30.0f}}},
     {ParameterId::RATED_MAX_CURRENT, "rated_max_current", ParameterType::REAL32, true, true, ParameterValue{float{30.0f}}},
+    {ParameterId::VELOCITY_PLANNING_TOLERANCE, "velocity_planning_tolerance", ParameterType::REAL32, true, true, ParameterValue{float{0.5f}}},
 }};
 
 consteval bool parameter_catalog_is_valid() {
@@ -176,6 +178,11 @@ consteval T parameter_default(ParameterId id) {
     return std::get<T>(*PARAMETER_CATALOG[static_cast<size_t>(id)].default_value);
 }
 
+// VBDrive native motion is CW-positive; user ang_dir=+1 selects CCW-positive.
+constexpr int8_t vbdrive_direction_multiplier(int32_t ang_dir) {
+    return ang_dir == -1 ? int8_t{1} : int8_t{-1};
+}
+
 template<class T>
 inline T value_or_default(T value, T fallback) {
     return std::isnan(value) ? fallback : value;
@@ -198,7 +205,7 @@ inline constexpr BaseConfigData BASE_CONFIG_DEFAULTS = [] {
     return config;
 }();
 
-inline constexpr uint32_t VBDRIVE_CONFIG_TYPE_ID = 0x44AAAC03;
+inline constexpr uint32_t VBDRIVE_CONFIG_TYPE_ID = 0x44AAAC04;
 
 struct __attribute__((packed)) VBDriveConfig {
     static constexpr uint32_t TYPE_ID = VBDRIVE_CONFIG_TYPE_ID;
@@ -233,6 +240,7 @@ struct __attribute__((packed)) VBDriveConfig {
     float servo_control_vel_ramp_rate = NAN;
     float rated_max_torque = NAN;
     float rated_max_current = NAN;
+    float velocity_planning_tolerance = NAN;
 
     bool are_required_params_set(const BaseConfigData& base) const;
     void apply_servo_config() const;

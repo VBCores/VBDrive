@@ -109,8 +109,8 @@ int main() {
     TrajectoryGenerator& prepared_filter=new_filter;
     assert(prepared_filter.start({99,99},2));
     prepared_filter.on_publish(&old_filter,100);
-    near(new_filter.reference,old_filter.reference,1e-7f);
-    near(new_filter.velocity,old_filter.velocity,1e-7f);
+    near(new_filter.reference,99,1e-7f);
+    near(new_filter.velocity,99,1e-7f);
     assert(new_filter.goal==2);
     prepared_filter.on_activate({.3f,.4f});
     near(new_filter.reference,.3f,1e-7f); near(new_filter.velocity,.4f,1e-7f);
@@ -128,6 +128,9 @@ int main() {
     prepared_poly.on_publish(nullptr,.001f);
     prepared_poly.on_activate({99,99}); // Prepared POLY initial conditions remain intact.
     near(prepared_poly.step(.0002f),.0012f*.0012f,1e-8f);
+    near(prepared_filter.get_velocity(),new_filter.velocity);
+    near(prepared_ramp.get_velocity(),new_ramp.reference);
+    near(prepared_poly.get_velocity(),published.velocity);
     puts("PASS: standalone/base-reference lifecycle, limits, filter/ramp and polynomial profiles");
 }
 '''
