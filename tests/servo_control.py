@@ -31,6 +31,7 @@ source = r'''
 #include <utility>
 #include <limits>
 #include "voltbro/math/regulators/pid.hpp"
+#define SERVO_REFERENCE_TRACE
 #include "voltbro/profiling.hpp"
 unsigned primask = 0;
 void (*irq_hook)() = nullptr;
@@ -77,7 +78,7 @@ struct FOC : BLDCController {
     ServoInputConfig servo_input_config;
     std::optional<ServoCommand> servo_command;
     std::optional<ServoTrajectoryStorage> servo_traj_generator;
-    uint32_t control_tick=0;
+    uint32_t control_tick=0, servo_reference_epoch=0;
     uint8_t servo_reference_ticks=0, servo_integral_ticks=0;
     bool servo_reference_initialize=false;
     FOCTarget foc_target;
@@ -410,7 +411,7 @@ int main() {
     assert(std::get<FilterTrajectory>(*generated.servo_traj_generator).reference==reference);
     assert(!generated.set_servo_command(ServoControlType::POSITION_FILTER,2,true,7));
     assert(generated.set_servo_command(ServoControlType::POSITION_FILTER,2,true,8));
-    near(std::get<FilterTrajectory>(*generated.servo_traj_generator).reference,.5f);
+    near(std::get<FilterTrajectory>(*generated.servo_traj_generator).reference,reference,1e-7f);
     input_config.input_bandwidth=0;
     assert(!generated.set_servo_input_config(input_config));
     generated.reset_servo_input();
@@ -426,11 +427,11 @@ int main() {
     assert(!generated.set_servo_command(POSITION_POLY,2,true,255));
     assert(generated.servo_command->value==1 && generated.servo_command->index==255);
     assert(generated.set_servo_command(POSITION_POLY,1,true,0));
-    near(std::get<PolyTrajectory>(*generated.servo_traj_generator).elapsed, generated.T, 1e-8f);
+    assert(generated.servo_reference_epoch==generated.control_tick+1);
     generated.control_tick+=40;
     assert(generated.set_servo_command(POSITION_POLY,1));
     assert(!generated.servo_command->has_index);
-    near(std::get<PolyTrajectory>(*generated.servo_traj_generator).elapsed, generated.T, 1e-8f);
+    assert(generated.servo_reference_epoch==generated.control_tick+1);
     assert(generated.set_servo_command(POSITION_DIRECT,1));
     assert(!generated.servo_traj_generator && generated.servo_command);
     assert(generated.set_foc_point({}));
@@ -494,11 +495,11 @@ int main() {
         FOC held; held.servo_input_config=aged.servo_input_config;
         assert(held.set_servo_command(POSITION_POLY,1));
         for(int i=0;i<phase;++i) { ++held.control_tick; held.servo_torque(); }
-        const auto epoch=held.control_tick;
+        const auto epoch=held.servo_reference_epoch;
         assert(held.set_servo_command(POSITION_POLY,2));
         do { ++held.control_tick; held.servo_torque(); } while(held.servo_reference_ticks!=7);
         near(std::get<PolyTrajectory>(*held.servo_traj_generator).elapsed,
-             float(held.control_tick-epoch)*held.T+8*held.T,1e-8f);
+             float(held.control_tick+8-epoch)*held.T,1e-8f);
     }
     FOC wrapped; wrapped.servo_input_config=aged.servo_input_config;
     wrapped.control_tick=UINT32_MAX-3;
@@ -506,14 +507,14 @@ int main() {
     assert(wrapped.set_servo_command(POSITION_POLY,1));
     ++wrapped.control_tick; wrapped.servo_torque();
     near(std::get<PolyTrajectory>(*wrapped.servo_traj_generator).elapsed,14*wrapped.T,1e-8f);
-    const auto config_epoch=wrapped.control_tick;
+    const auto config_epoch=wrapped.servo_reference_epoch;
     interrupted_motor=&wrapped; irq_hook=foc_interrupt;
     assert(wrapped.set_servo_input_config(wrapped.servo_input_config));
     do { ++wrapped.control_tick; wrapped.servo_torque(); } while(wrapped.servo_reference_ticks!=7);
     near(std::get<PolyTrajectory>(*wrapped.servo_traj_generator).elapsed,
          (wrapped.control_tick-config_epoch+8)*wrapped.T,1e-8f);
 
-    // Use the last planner velocity literally; position is always measured.
+    // Measured position on entry; uninterrupted reference position and velocity within a mode.
     FOC planning;
     planning.servo_input_config={.input_bandwidth=10,.velocity_limit=1,.acceleration_limit=2,
                                 .deceleration_limit=2,.velocity_planning_tolerance=.5f};
@@ -522,8 +523,10 @@ int main() {
     near(initial.position,.2f);near(initial.velocity,.1f); // No previous planner.
     assert(planning.set_servo_command(POSITION_POLY,1));
     std::get<PolyTrajectory>(*planning.servo_traj_generator).velocity=.4f;
+    planning.shaft_angle=99; planning.shaft_velocity=-10;
     assert(planning.set_servo_command(POSITION_POLY,2));
     near(std::get<PolyTrajectory>(*planning.servo_traj_generator).reference,.2f);
+    planning.shaft_angle=.2f;planning.shaft_velocity=.1f;
     near(std::get<PolyTrajectory>(*planning.servo_traj_generator).velocity,.4f);
     std::get<PolyTrajectory>(*planning.servo_traj_generator).velocity=.6f;
     near(planning.servo_initial_state(.5f).velocity,.6f); // Inclusive boundary.
@@ -539,11 +542,11 @@ int main() {
     near(std::get<FilterTrajectory>(*planning.servo_traj_generator).velocity,.4f);
     configured.velocity_planning_tolerance=0;
     assert(planning.set_servo_input_config(configured));
-    near(std::get<FilterTrajectory>(*planning.servo_traj_generator).velocity,.1f);
+    near(std::get<FilterTrajectory>(*planning.servo_traj_generator).velocity,.4f);
     for(float invalid:{-1.f,NAN,INFINITY}) {
         auto bad=configured;bad.velocity_planning_tolerance=invalid;
         assert(!planning.set_servo_input_config(bad));
-        near(std::get<FilterTrajectory>(*planning.servo_traj_generator).velocity,.1f);
+        near(std::get<FilterTrajectory>(*planning.servo_traj_generator).velocity,.4f);
     }
     planning.reset_servo_input();near(planning.servo_initial_state(.5f).velocity,.1f);
     // Same units/signs as command and telemetry, including direction and offset.
@@ -568,6 +571,57 @@ int main() {
     }
     near(std::get<PolyTrajectory>(*stream.servo_traj_generator).velocity,1,.002f);
     assert(stream.target>0);
+
+    // POLY preparation may span several reference updates; account for time once, at every phase.
+    for(int phase=0;phase<8;++phase) {
+        FOC delayed;
+        delayed.servo_input_config={.velocity_limit=5,.acceleration_limit=20,.deceleration_limit=20};
+        assert(delayed.set_servo_command(POSITION_POLY,1));
+        for(int i=0;i<80+phase;++i){++delayed.control_tick;delayed.servo_torque();}
+        const auto initial=get_trajectory(*delayed.servo_traj_generator).get_state();
+        const auto epoch=delayed.servo_reference_epoch;
+        PolyTrajectory expected(5,20,20);assert(expected.start(initial,-1));
+        interrupted_motor=&delayed; irq_hook=[] {
+            for(int i=0;i<40;++i) { ++interrupted_motor->control_tick;interrupted_motor->servo_torque(); }
+        };
+        const auto integral_ticks=delayed.servo_integral_ticks;
+        assert(delayed.set_servo_command(POSITION_POLY,-1));
+        assert(delayed.servo_integral_ticks==integral_ticks); // 40 ISR ticks, no command reset.
+        do {++delayed.control_tick;delayed.servo_torque();} while(delayed.servo_reference_ticks!=7);
+        const float elapsed=float(delayed.control_tick+8-epoch)*delayed.T; // Time from old reference point.
+        const float reference=expected.sample_at(elapsed);
+        near(delayed.target,reference,1e-7f);
+        near(get_trajectory(*delayed.servo_traj_generator).get_state().velocity,expected.velocity,1e-6f);
+    }
+
+    // Changing goals must advance the reference even with stationary feedback and tolerance zero.
+    for(uint8_t type:{POSITION_FILTER,POSITION_POLY}) for(int rate:{100,200,1000}) {
+        FOC sweep;
+        sweep.servo_input_config={.input_bandwidth=40,.velocity_limit=5,.acceleration_limit=20,
+                                  .deceleration_limit=20,.velocity_planning_tolerance=0};
+        float maximum=0,minimum=0;
+        for(int tick=0;tick<320000;++tick) {
+            const float t=tick*sweep.T; // Elapsed sweep time, seconds.
+            const float goal=t<2 ? .25f*t : t<6 ? .5f-.25f*(t-2) : -.5f+.25f*(t-6);
+            if(tick%(40000/rate)==0) {
+                const auto before=sweep.servo_traj_generator
+                    ? get_trajectory(*sweep.servo_traj_generator).get_state() : TrajectoryState{};
+                const auto integral_ticks=sweep.servo_integral_ticks;
+                assert(sweep.set_servo_command(type,goal));
+                if(tick) {
+                    const auto after=get_trajectory(*sweep.servo_traj_generator).get_state();
+                    near(after.position,before.position,1e-6f);
+                    near(after.velocity,before.velocity,1e-5f);
+                    assert(sweep.servo_integral_ticks==integral_ticks);
+                }
+            }
+            const float old=sweep.target;
+            ++sweep.control_tick;sweep.servo_torque();
+            assert(std::fabs(sweep.target-old)<.002f); // No position reset at a changing goal.
+            maximum=std::max(maximum,sweep.target);minimum=std::min(minimum,sweep.target);
+        }
+        assert(maximum>.45f && minimum<-.45f); // Stationary measurements cannot erase the reference.
+    }
 
     // Idempotent is_on for all Servo modes and MIT; off/on starts neutral with fresh PI state.
     VBDrive enabled;

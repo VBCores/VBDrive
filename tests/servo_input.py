@@ -108,9 +108,9 @@ int main() {
     assert(old_filter.start({0,.2f},1)); old_filter.step(.01f);
     TrajectoryGenerator& prepared_filter=new_filter;
     assert(prepared_filter.start({99,99},2));
-    prepared_filter.on_publish(&old_filter,100);
-    near(new_filter.reference,99,1e-7f);
-    near(new_filter.velocity,99,1e-7f);
+    prepared_filter.on_update(&old_filter,100);
+    near(new_filter.reference,old_filter.reference,1e-7f);
+    near(new_filter.velocity,old_filter.velocity,1e-7f);
     assert(new_filter.goal==2);
     prepared_filter.on_activate({.3f,.4f});
     near(new_filter.reference,.3f,1e-7f); near(new_filter.velocity,.4f,1e-7f);
@@ -119,17 +119,19 @@ int main() {
     assert(old_ramp.start({0,.2f},1)); old_ramp.step(.01f);
     TrajectoryGenerator& prepared_ramp=new_ramp;
     assert(prepared_ramp.start({99,99},2));
-    prepared_ramp.on_publish(&old_ramp,100);
+    prepared_ramp.on_update(&old_ramp,100);
     near(new_ramp.reference,old_ramp.reference,1e-7f); assert(new_ramp.goal==2);
     prepared_ramp.on_activate({99,.4f}); near(new_ramp.reference,.4f,1e-7f);
     near(prepared_ramp.step(.1f),.6f,1e-7f); // New slew rate survives publication.
     PolyTrajectory published(1,2,2); TrajectoryGenerator& prepared_poly=published;
     assert(prepared_poly.start({0,0},1));
-    prepared_poly.on_publish(nullptr,.001f);
+    prepared_poly.on_update(nullptr,.001f);
     prepared_poly.on_activate({99,99}); // Prepared POLY initial conditions remain intact.
     near(prepared_poly.step(.0002f),.0012f*.0012f,1e-8f);
+    near(prepared_filter.get_state().position,new_filter.reference);
     near(prepared_filter.get_velocity(),new_filter.velocity);
     near(prepared_ramp.get_velocity(),new_ramp.reference);
+    near(prepared_poly.get_state().position,published.reference);
     near(prepared_poly.get_velocity(),published.velocity);
     puts("PASS: standalone/base-reference lifecycle, limits, filter/ramp and polynomial profiles");
 }

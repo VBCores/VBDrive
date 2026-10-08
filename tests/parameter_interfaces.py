@@ -98,7 +98,7 @@ struct VBDrive {
     std::optional<ServoCommand> servo_command;
     std::optional<ServoTrajectoryStorage> servo_traj_generator;
     float T=.000025f;
-    uint32_t control_tick=0;
+    uint32_t control_tick=0, servo_reference_epoch=0;
     uint8_t servo_reference_ticks=0, servo_integral_ticks=0;
     bool servo_reference_initialize=false;
     float servo_target=0;

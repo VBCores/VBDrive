@@ -139,16 +139,24 @@ per second. These modes shape the input of the existing Servo PID; its feedback
 does not alter the generated reference. Limits govern the reference, not actual
 motor motion. Configuration changes take effect immediately.
 
-On each new FILTER/POLY command or generator-configuration change, planning starts
-from the **measured output-shaft position**. Its initial velocity is the last
-velocity returned by the active trajectory generator if it differs from measured
-velocity by no more than `velocity_planning_tolerance`; otherwise measured
-velocity is used. If no generator is available, measured velocity is used.
-The tolerance is in output rad/s, accepts finite non-negative values, and `NaN`
-restores 0.5 rad/s. The comparison is inclusive; zero requires matching velocities.
-No time resampling or reconstruction of the previous profile is performed.
-Between commands, generation uses only its prepared state and time. Duplicate
-commands do not reinitialize either mode.
+New goals in an active FILTER/POLY mode preserve the reference position and
+velocity. FILTER changes its goal without restarting the filter; POLY plans a
+new profile from the previous reference state on the same time axis. Generator
+configuration changes preserve this state as well. The reference is held between
+5 kHz updates; command arrival does not restart its update period or the PID integral.
+
+On entry to FILTER/POLY, position is measured. Initial velocity is taken from the
+previous generator if it differs from measured velocity by no more than
+`velocity_planning_tolerance`; otherwise measured velocity is used. Without a
+previous generator, both initial values are measured. The tolerance applies to
+mode entry, not to continuing commands or configuration changes. It is in output
+rad/s, accepts finite non-negative values, and `NaN` restores 0.5 rad/s. The
+comparison is inclusive; zero requires matching velocities. STOP/OFF, MIT and
+calibration clear the generator. Duplicate commands do not restart it.
+
+Bandwidth and trajectory limits determine the reference's response time. They
+do not introduce an additional command-processing pause; generating a new goal
+does not require the motor to reach the previous one.
 
 
 > Servo control IDs are:
@@ -165,8 +173,8 @@ The Servo wire format contains `control_type`, `set_point_value` and an
 optional one-byte `command_idx`.
 An absent index deduplicates consecutive identical commands. With an index,
 repeating the index with changed type/value is invalid and increments
-`cmd_errors`; a changed index starts a new command. New FILTER/POLY commands initialize from measured position and the velocity-selection
-rule above. RAMP continues its velocity reference. STOP, disable, MIT and
+`cmd_errors`; a changed index starts a new command. New FILTER/POLY goals preserve the active reference state; mode entry uses the
+initial-state rule above. RAMP continues its velocity reference. STOP, disable, MIT and
 calibration reset command history.
 At high command rates the three-frame FDCAN receive FIFO uses overwrite mode,
 so a full FIFO retains the newest frames. The firmware keeps no second command queue.
