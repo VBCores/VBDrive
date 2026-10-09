@@ -274,7 +274,10 @@ void app() {
     // Lock heap, no dynamic memory is used at runtime
     global_allocation_lock = true;
 
-    HAL_TIM_Base_Start_IT(&htim4);
+    // TIM1 already runs PWM/ADC. Enable only the internal compare interrupt:
+    // HAL_TIM_OC_Start_IT would also enable MOE and energize the power stage.
+    __HAL_TIM_CLEAR_IT(&htim1, TIM_IT_CC4);
+    __HAL_TIM_ENABLE_IT(&htim1, TIM_IT_CC4);
 
     while(true) {
         cyphal_loop();

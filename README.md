@@ -429,7 +429,11 @@ application-specific schema validation belongs to the application.
 
 ### Control scheduling
 
-FOC current regulation and Servo P/D run at 40 kHz. Servo input generators
+FOC current regulation and Servo P/D run at 40 kHz. TIM1 Update triggers
+the ADC scans; internal CH4 compare starts FOC 4 us later (down-counting,
+80 MHz counter, ARR = 1999, CCR4 = 1679). PWM compare values take effect
+on the next Update. The shaft encoder is polled after control every ninth tick.
+Servo input generators
 advance at 5 kHz with `dt = 200 us`; the next reference is held for eight FOC
 ticks. Servo integral accumulates all five error samples and commits at 8 kHz
 (`125 us` per update), with anti-windup and per-tick output limiting.
