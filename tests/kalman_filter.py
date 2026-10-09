@@ -15,6 +15,7 @@ code = r'''
 #include <cmath>
 #include <cstdio>
 #include "voltbro/profiling.hpp"
+#include "voltbro/math/consts.h"
 #define pi2 6.28318530718f
 #define PI 3.14159265358979f
 float mfmod(float x,float y) { return x-int(x/y)*y; }
