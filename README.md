@@ -122,6 +122,8 @@ coordinates, references are the direct or generated targets, and $\tau$ is
 output-shaft torque. The subscripts $p$ and $v$ select the position and velocity
 gain registers. $t_0$ is the latest reset of the respective integral state.
 
+![SERVO control loops](docs/servo-control.png)
+
 Torque is limited by rated and user output-shaft torque and available current
 (including stall derating), with conditional
 integration to prevent windup.
@@ -181,6 +183,22 @@ initial-state rule above. RAMP continues its velocity reference. STOP, disable, 
 calibration reset command history.
 At high command rates the three-frame FDCAN receive FIFO uses overwrite mode,
 so a full FIFO retains the newest frames. The firmware keeps no second command queue.
+
+### MIT Control
+
+The MIT control law is
+
+$$
+\tau(t)=K_p\bigl(\theta_{\mathrm{cmd}}-\theta(t)\bigr)
++K_d\bigl(\omega_{\mathrm{cmd}}-\omega(t)\bigr)+\tau_{\mathrm{ff}}.
+$$
+
+![MIT control loop](docs/mit-foc-control.png)
+
+Position and velocity terms act in parallel, with torque feed-forward and no
+integral term. Gains and feed-forward torque are supplied in each MIT command.
+The summed torque is converted to an $I_q$ reference and passes through the
+common FOC current limits.
 
 ---
 
