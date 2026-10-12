@@ -65,7 +65,7 @@ struct BLDCController {
     SetPointType point_type=SetPointType::VOLTAGE;
     float target=0, shaft_angle=0, shaft_velocity=0, shaft_torque=0;
 '''
-source += bldc[bldc.index("    FORCE_INLINE bool is_symmetric_limit_set"):bldc.index("    const DriveInfo drive_info;")]
+source += bldc[bldc.index("    FORCE_INLINE bool is_symmetric_limit_set"):bldc.index("    DriveInfo drive_info;")]
 for name in ("virtual void reset_control()", "void set_point(",
              "FORCE_INLINE virtual bool set_angle_point", "FORCE_INLINE virtual bool set_velocity_point",
              "FORCE_INLINE virtual bool set_torque_point", "FORCE_INLINE virtual bool set_voltage_point",

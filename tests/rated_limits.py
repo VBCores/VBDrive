@@ -16,6 +16,7 @@ code='''
 #include <cmath>
 #include <algorithm>
 #define FORCE_INLINE inline
+#define CRITICAL_SECTION(code) {code}
 using HAL_StatusTypeDef=int;
 constexpr int HAL_OK=0;
 struct DriveRuntimeConfig {
@@ -34,6 +35,7 @@ struct BLDCController:AbstractMotor {
  void detect_stall(double);void quit_stall();
 '''
 code+=bldc[bldc.index('    FORCE_INLINE bool is_symmetric_limit_set'):bldc.index('    FORCE_INLINE float get_direction_multiplier')]
+code+=function(bldc,'void set_torque_const(')+'\n'
 code+=function(bldc,'virtual bool check_runtime_config(')+'\n'+function(bldc,'virtual HAL_StatusTypeDef apply_runtime_config()')+'\n};\n'
 code+=function(impl,'void BLDCController::detect_stall(')+'\n'+function(impl,'void BLDCController::quit_stall()')
 code+='''
@@ -49,6 +51,9 @@ int main(){
   assert(m.is_torque_target_valid(1) && m.is_torque_target_valid(-1));
   assert(!m.is_torque_target_valid(1.01f) && !m.is_torque_target_valid(-1.01f));
  }
+ m.set_torque_const(1.f);
+ assert(m.is_torque_target_valid(2.f) && !m.is_torque_target_valid(2.01f));
+ m.set_torque_const(.5f); // Current-limited torque follows the live constant.
  m.detect_stall(0);m.detect_stall(4);
  assert(m.is_stalling && m.drive_runtime_config.current_limit==2); // Stall rating 6 must not raise 2.
  requested.user_current_limit=1;requested.user_torque_limit=3;requested.current_limit=6;

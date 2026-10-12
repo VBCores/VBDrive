@@ -175,6 +175,17 @@ bool read_parameter(const DriveConfig& data, ParameterId id, ParameterValue& val
 ) {
     auto& config = data.app;
     auto& base = data.base;
+    if (id == ParameterId::KT) {
+        const float torque_const = value_or_default(std::get<float>(value), parameter_default<float>(ParameterId::KT));
+        if (!std::isfinite(torque_const) || torque_const <= 0) return ParameterWriteResult::INVALID;
+        if (apply_runtime) {
+            auto motor = get_motor();
+            if (!motor) return ParameterWriteResult::UNAVAILABLE;
+            motor->set_torque_const(torque_const);
+        }
+        config.torque_const = std::get<float>(value);
+        return ParameterWriteResult::OK;
+    }
     if (id == ParameterId::RATED_MAX_TORQUE || id == ParameterId::RATED_MAX_CURRENT) {
         const float rating = value_or_default(std::get<float>(value), id == ParameterId::RATED_MAX_CURRENT
             ? parameter_default<float>(ParameterId::RATED_MAX_CURRENT)
@@ -291,7 +302,6 @@ bool read_parameter(const DriveConfig& data, ParameterId id, ParameterValue& val
         case ParameterId::ANG_OFF: config.angle_offset = std::get<float>(value); break;
         case ParameterId::MIN_ANG: config.min_angle = std::get<float>(value); break;
         case ParameterId::MAX_ANG: config.max_angle = std::get<float>(value); break;
-        case ParameterId::KT: config.torque_const = std::get<float>(value); break;
         case ParameterId::KP: config.kp = std::get<float>(value); break;
         case ParameterId::KI: config.ki = std::get<float>(value); break;
         case ParameterId::KD: config.kd = std::get<float>(value); break;

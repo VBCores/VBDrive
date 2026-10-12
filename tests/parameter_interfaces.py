@@ -91,6 +91,8 @@ struct VBInverter {
     float get_stator_temperature() const {return 25;}
 };
 struct VBDrive {
+    struct { float torque_const=1.0f; } drive_info;
+    __PRODUCTION_KT_SETTER__
     PIDConfig position, velocity;
     PIDConfig get_servo_config(SetPointType type) const {return type==SetPointType::POSITION?position:velocity;}
     void update_servo_config(SetPointType type,PIDConfig config) {(type==SetPointType::POSITION?position:velocity)=config;}
@@ -156,6 +158,8 @@ foc_header=(ROOT/'Drivers/libvoltbro/voltbro/motors/bldc/foc/foc.hpp').read_text
 methods='\n'.join(extract_function(foc_header, sig) for sig in
                   ('TrajectoryState servo_initial_state(', 'void reset_servo_input()', 'bool set_servo_input_config(', 'bool set_servo_command('))
 methods=methods.replace('bool set_servo_command(', 'bool set_servo_command_impl(').replace('target =', 'servo_target =')
+bldc_header=(ROOT/'Drivers/libvoltbro/voltbro/motors/bldc/bldc.h').read_text()
+STUB=STUB.replace('__PRODUCTION_KT_SETTER__', extract_function(bldc_header, 'void set_torque_const('))
 STUB=STUB.replace('__PRODUCTION_SERVO_METHODS__', methods).replace('#include <voltbro/utils.hpp>', '#include <voltbro/utils.hpp>\n#include <voltbro/profiling.hpp>')
 
 TEST = r'''
@@ -305,6 +309,36 @@ int main() {
     int saved=eeprom.writes; manager.persist_pending_config(); assert(eeprom.writes==saved+1);
     fill_register_integer32(input,-1); access("ang_dir",input); assert(config.app.angle_direction==-1 && device.limits.user_angle_direction==1);
     fill_register_integer32(input,1); access("ang_dir",input); assert(config.app.angle_direction==1 && device.limits.user_angle_direction==-1);
+    // CAN kt changes the active conversion, persists and preserves motor/control state.
+    const int kt_resets=resets;
+    const auto kt_starts=device.starts;
+    const bool kt_on=device.on;
+    const auto kt_target=device.target;
+    fill_register_real32(input,.75f);
+    assert(access("kt",input).real32.value.elements[0]==.75f);
+    assert(device.drive_info.torque_const==.75f && config.app.torque_const==.75f);
+    assert(resets==kt_resets && device.starts==kt_starts && device.on==kt_on);
+    assert(device.target.velocity==kt_target.velocity);
+    manager.persist_pending_config();
+    DriveConfig kt_saved; eeprom.read(&kt_saved,0); assert(kt_saved.app.torque_const==.75f);
+    for(float invalid:{0.f,-1.f,INFINITY,-INFINITY}) {
+        fill_register_real32(input,invalid);
+        assert(access("kt",input).real32.value.elements[0]==.75f);
+        assert(device.drive_info.torque_const==.75f && config.app.torque_const==.75f);
+    }
+    command("CONFIG"); command("kt:2");
+    assert(command("kt:0").find("Invalid")!=std::string::npos);
+    assert(device.drive_info.torque_const==.75f); // Serial stages only.
+    fill_register_real32(input,.5f); access("kt",input);
+    assert(device.drive_info.torque_const==.5f);
+    command("EXIT"); assert(config.app.torque_const==.5f);
+    const auto kt_nan_starts=device.starts;
+    fill_register_real32(input,NAN);
+    assert(access("kt",input).real32.value.elements[0]==1.f);
+    assert(device.drive_info.torque_const==1.f && std::isnan(config.app.torque_const));
+    manager.persist_pending_config(); eeprom.read(&kt_saved,0);
+    assert(std::isnan(kt_saved.app.torque_const));
+    assert(resets==kt_resets && device.starts==kt_nan_starts && device.on==kt_on);
     for (const auto& d:PARAMETER_CATALOG) {
         if (!d.is_persistent) continue;
         if (d.type==ParameterType::REAL32) fill_register_real32(input,1);

@@ -50,6 +50,12 @@ registers apply at runtime and are saved.
 `node_id = 0` is an unset configuration value. An unconfigured device uses a
 temporary setup node ID derived from its MCU UID.
 
+Cyphal writes to `kt` apply to the running controller without restarting and
+are saved to EEPROM. The updated constant is used for torque/current conversion,
+torque limits and torque reporting. `kt` must be finite and strictly positive;
+`NaN` restores the default 1.0 N m/A. Serial changes remain staged in `CONFIG`;
+`APPLY` saves and restarts the controller.
+
 `rated_max_torque` and `rated_max_current` are read/write and persistent. They
 initialize `DriveInfo` at startup; changed ratings take effect after restart
 (Serial `CONFIG`/`APPLY`, or a restart after Cyphal writes). Ratings must be
