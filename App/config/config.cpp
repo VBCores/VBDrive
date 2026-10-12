@@ -148,7 +148,7 @@ bool read_parameter(const DriveConfig& data, ParameterId id, ParameterValue& val
             value.emplace<float>(motor->get_voltage());
             return true;
         case ParameterId::BUS_CURRENT:
-            value.emplace<float>(motor->get_working_current());
+            value.emplace<float>(motor->get_bus_current());
             return true;
         case ParameterId::TEMP_MCU:
             value.emplace<float>(inverter.get_mcu_temperature() + 273.15f);

@@ -197,9 +197,12 @@ All entries are non-persistent and readable without CONFIG. Writes are rejected.
 | `firmware_rev` | string | Latest version tag (for example, `4.0.0`) |
 | `device` | string | Fixed device type: `vbdrive`, independent of writable `name` |
 | `bus_voltage` | real32 | Bus voltage, V |
-| `bus_current` | real32 | Working-current measurement, A; not a separate DC-link sensor |
+| `bus_current` | real32 | Estimated DC-link current, A |
 | `temp_mcu` | real32 | MCU temperature, K |
 | `temp_stator` | real32 | Stator temperature, K |
+
+`bus_current` is computed as $I_{bus} \approx 3(V_d I_d + V_q I_q)/(2V_{bus})$,
+using filtered dq currents and the voltage vector after its magnitude limit. It is zero when the drive is disabled, during bootstrap charging or when bus voltage is zero.
 
 Both temperature registers report kelvins: subtract 273.15 to get degrees Celsius.
 `temp_mcu` is the temperature of the embedded STM32G431 die in the central part

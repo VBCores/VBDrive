@@ -61,6 +61,7 @@ struct BLDCController {
     virtual int stop() { return 0; }
     virtual int start() { return 0; }
     DriveInfo drive_info;
+    float bus_current=0;
     RuntimeConfig drive_runtime_config;
     SetPointType point_type=SetPointType::VOLTAGE;
     float target=0, shaft_angle=0, shaft_velocity=0, shaft_torque=0;

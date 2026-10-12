@@ -129,6 +129,8 @@ struct VBDrive {
     auto& get_inverter() const {return inverter;}
     float get_voltage() const {return 24;}
     float get_working_current() const {return .1f;}
+    float bus_current=.2f;
+    __PRODUCTION_BUS_CURRENT_GETTER__
     uint32_t get_shaft_encoder_value() const {return 123;}
     uint32_t get_rotor_encoder_value() const {return 456;}
     int servo_type=-1;
@@ -157,6 +159,7 @@ def extract_function(text, signature):
 foc_header=(ROOT/'Drivers/libvoltbro/voltbro/motors/bldc/foc/foc.hpp').read_text()
 methods='\n'.join(extract_function(foc_header, sig) for sig in
                   ('TrajectoryState servo_initial_state(', 'void reset_servo_input()', 'bool set_servo_input_config(', 'bool set_servo_command('))
+STUB=STUB.replace('__PRODUCTION_BUS_CURRENT_GETTER__', extract_function(foc_header, 'float get_bus_current() const'))
 methods=methods.replace('bool set_servo_command(', 'bool set_servo_command_impl(').replace('target =', 'servo_target =')
 bldc_header=(ROOT/'Drivers/libvoltbro/voltbro/motors/bldc/bldc.h').read_text()
 STUB=STUB.replace('__PRODUCTION_KT_SETTER__', extract_function(bldc_header, 'void set_torque_const('))
@@ -305,6 +308,14 @@ int main() {
         handle_parameter_register(d-PARAMETER_CATALOG.data(),in,out,r); return out;
     };
     uavcan_register_Value_1_0 input{};
+    assert(access("bus_current",{}).real32.value.elements[0]==.2f);
+    assert(command("bus_current:?")=="bus_current:0.200000\n\r");
+    device.bus_current=-.3f;
+    assert(access("bus_current",{}).real32.value.elements[0]==-.3f);
+    assert(command("bus_current:?")=="bus_current:-0.300000\n\r");
+    fill_register_real32(input,4.f);
+    assert(access("bus_current",input).real32.value.elements[0]==-.3f);
+    device.bus_current=.2f;
     const int before_node_write=eeprom.writes; fill_register_integer32(input,12); access("node_id",input); assert(config.base.node_id==12 && eeprom.writes==before_node_write);
     int saved=eeprom.writes; manager.persist_pending_config(); assert(eeprom.writes==saved+1);
     fill_register_integer32(input,-1); access("ang_dir",input); assert(config.app.angle_direction==-1 && device.limits.user_angle_direction==1);
