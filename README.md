@@ -108,16 +108,13 @@ changing the active target. Filter bandwidth is in 1/s; velocity limits and
 ramp rate are in output rad/s and rad/s². The POSITION control law is
 
 $$
-\tau(t) = K_{p,p}\bigl(\theta_{\mathrm{ref}}(t)-\theta(t)\bigr)
-+ K_{i,p}\int_{t_0}^{t}\bigl(\theta_{\mathrm{ref}}(t)-\theta(t)\bigr)\,dt
-- K_{d,p}\omega(t).
+\tau(t) = K_{p,p}\bigl(\theta_{\mathrm{ref}}(t)-\theta(t)\bigr) + K_{i,p}\int_{t_0}^{t}\bigl(\theta_{\mathrm{ref}}(t)-\theta(t)\bigr)\,dt - K_{d,p}\omega(t).
 $$
 
 The VELOCITY control law is
 
 $$
-\tau(t) = K_{p,v}\bigl(\omega_{\mathrm{ref}}(t)-\omega(t)\bigr)
-+ K_{i,v}\int_{t_0}^{t}\bigl(\omega_{\mathrm{ref}}(t)-\omega(t)\bigr)\,dt.
+\tau(t) = K_{p,v}\bigl(\omega_{\mathrm{ref}}(t)-\omega(t)\bigr) + K_{i,v}\int_{t_0}^{t}\bigl(\omega_{\mathrm{ref}}(t)-\omega(t)\bigr)\,dt.
 $$
 
 Here $\theta$ and $\omega$ are actual output-shaft position and velocity in user
