@@ -103,7 +103,7 @@ inline void serial_get_parameter(const DriveConfig& config, std::string_view par
     }
 }
 
-inline bool serial_set_parameter(DriveConfig& config, std::string_view param, std::string_view input, UARTResponseAccumulator& responses, bool apply_runtime) {
+inline bool serial_set_parameter(DriveConfig& config, std::string_view param, std::string_view input, UARTResponseAccumulator& responses, bool staged) {
     const auto* definition = find_parameter(param);
     if (!definition) {
         responses.append("%.*s ERROR: Unknown parameter\r\n", static_cast<int>(param.size()), param.data());
@@ -139,7 +139,7 @@ inline bool serial_set_parameter(DriveConfig& config, std::string_view param, st
         return false;
     }
 
-    if (write_persistent_parameter(config, definition->id, value, apply_runtime) != ParameterWriteResult::OK) {
+    if (write_persistent_parameter(config, definition->id, value, staged) != ParameterWriteResult::OK) {
         responses.append("%.*s ERROR: Invalid value\r\n", static_cast<int>(param.size()), param.data());
         return false;
     }

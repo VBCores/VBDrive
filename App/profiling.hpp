@@ -18,6 +18,7 @@ using HandlerTimingStats = profiling::IntervalStats;
 inline HandlerTimingStats servo_handler_timing;
 inline HandlerTimingStats mit_handler_timing;
 inline HandlerTimingStats can_arrival_timing;
+inline HandlerTimingStats temperature_service_timing;
 #endif
 
 #ifdef MONITOR

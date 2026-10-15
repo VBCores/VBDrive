@@ -19,6 +19,7 @@ program = r'''
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <initializer_list>
 static uint16_t vref_cal = 1657, temp_cal1 = 1031, temp_cal2 = 1367;
 #define VREFINT_CAL_ADDR (&vref_cal)
 #define TEMPSENSOR_CAL1_ADDR (&temp_cal1)
@@ -26,7 +27,9 @@ static uint16_t vref_cal = 1657, temp_cal1 = 1031, temp_cal2 = 1367;
 struct Inverter {
     uint32_t ADC_1_buffer[4]{};
     uint32_t ADC_2_buffer[2]{};
-    float mcu_temperature = 0, stator_temperature = 0;
+    float mcu_temperature = NAN, stator_temperature = NAN;
+    bool started=true;
+    bool has_started() const {return started;}
 ''' + method + r'''
 };
 int main() {
@@ -50,6 +53,18 @@ int main() {
     inverter.update_temperature();
     assert(std::isnan(inverter.mcu_temperature));
     assert(std::isfinite(inverter.stator_temperature));
+    inverter.ADC_1_buffer[3]=1506;
+    for (uint32_t invalid : {0u,4095u,4096u,65535u}) {
+        inverter.ADC_2_buffer[1]=invalid;inverter.update_temperature();
+        assert(std::isnan(inverter.stator_temperature));
+        inverter.ADC_1_buffer[3]=invalid;inverter.update_temperature();
+        assert(std::isnan(inverter.mcu_temperature));
+    }
+    inverter.ADC_2_buffer[1]=1749;inverter.ADC_1_buffer[3]=1506;
+    temp_cal2=temp_cal1;inverter.update_temperature();assert(std::isnan(inverter.mcu_temperature));
+    temp_cal2=1367;vref_cal=0;inverter.update_temperature();assert(std::isnan(inverter.mcu_temperature));
+    vref_cal=1657;inverter.started=false;inverter.update_temperature();
+    assert(std::isnan(inverter.mcu_temperature) && std::isnan(inverter.stator_temperature));
 }
 '''
 with tempfile.TemporaryDirectory(prefix='vbdrive-temperature-') as folder:

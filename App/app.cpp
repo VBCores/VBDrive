@@ -102,7 +102,7 @@ VBDrive* get_motor() {
     return motor;
 }
 
-void create_motor(VBDriveConfig& config_data) {
+[[gnu::cold]] void create_motor(VBDriveConfig& config_data) {
     constexpr float voltage_limit = 50.0f;
     motor = new (&motor_storage) VBDrive(
         0.000025f,
@@ -171,12 +171,15 @@ void create_motor(VBDriveConfig& config_data) {
         config_data.angle_encoder
     );
     config_data.apply_servo_config();
+    config_data.apply_temperature_config();
     HAL_Delay(100);
     motor->init();
 }
 
 bool is_able_to_calibrate() {
     auto& app_manager = get_app_manager();
+    app_manager.service_temperature();
+    if (!motor || motor->get_status() != VBDriveStatus::NOMINAL) return false;
     auto state = app_manager.get_state();
     return (
         state == CommandState::NOT_CALIBRATED ||
@@ -188,7 +191,7 @@ static void report_calibration_progress(int done, int total) {
     serial_send_message("CALIBRATE %d/%d DONE\r\n", done, total);
 }
 
-bool do_calibrate() {
+[[gnu::cold]] bool do_calibrate() {
     // Stop all control and enable the bridge for the calibration motion.
     motor->reset_servo_input();
     motor->set_foc_point(FOCTarget{0});
@@ -200,7 +203,17 @@ bool do_calibrate() {
 
     pause_cyphal_for_calibration();
     calibration_data.reset();
-    motor->calibrate(calibration_data, cyphal_queue_buffer_shared, SHARED_BUFFER_SIZE, report_calibration_progress);
+    const bool success = motor->calibrate(calibration_data, cyphal_queue_buffer_shared, SHARED_BUFFER_SIZE,
+        report_calibration_progress, []() {
+            get_app_manager().service_temperature();
+            return motor->get_status() == VBDriveStatus::NOMINAL;
+        });
+    if (!success) {
+        app_manager.set_motor_enabled(false);
+        app_manager.set_state(CommandState::NOT_CALIBRATED);
+        resume_cyphal_after_calibration();
+        return false;
+    }
     calibration_data.was_calibrated = true;
     HAL_IMPORTANT(eeprom.write<CalibrationData>(&calibration_data, CALIBRATION_PLACEMENT))
     motor->apply_calibration(calibration_data);
@@ -259,8 +272,8 @@ void app() {
 
     setup_cordic();
     create_motor(config_data.app);
-    motor->start();
     apply_calibration();
+    app_manager.request_startup_enable();
     motor->set_foc_point(FOCTarget{0});
 
     // Warm up
@@ -279,7 +292,13 @@ void app() {
     __HAL_TIM_CLEAR_IT(&htim1, TIM_IT_CC4);
     __HAL_TIM_ENABLE_IT(&htim1, TIM_IT_CC4);
 
+    uint32_t temperature_time = millis_32() - 1U;
     while(true) {
+        const uint32_t now = millis_32();
+        if (now != temperature_time) {
+            temperature_time = now;
+            app_manager.service_temperature();
+        }
         cyphal_loop();
         process_serial();
         get_app_manager().persist_pending_config();

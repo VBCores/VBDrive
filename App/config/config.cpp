@@ -24,11 +24,13 @@ void record_invalid_command() {
     invalid_commands_counter += 1;
 }
 
-bool read_parameter(const DriveConfig& data, ParameterId id, ParameterValue& value) {
+[[gnu::optimize("Os")]] bool read_parameter(const DriveConfig& data, ParameterId id, ParameterValue& value) {
     const auto& config = data.app;
     const auto& base = data.base;
     value = {};
     switch (id) {
+        case ParameterId::MAX_TEMP: value = value_or_default(config.max_temp, parameter_default<float>(ParameterId::MAX_TEMP)); return true;
+        case ParameterId::RESTART_TEMP: value = value_or_default(config.restart_temp, parameter_default<float>(ParameterId::RESTART_TEMP)); return true;
         case ParameterId::SERVO_POS_P_GAIN: value = value_or_default(config.servo_pos_p_gain, parameter_default<float>(ParameterId::SERVO_POS_P_GAIN)); return true;
         case ParameterId::SERVO_POS_I_GAIN: value = value_or_default(config.servo_pos_i_gain, parameter_default<float>(ParameterId::SERVO_POS_I_GAIN)); return true;
         case ParameterId::SERVO_POS_D_GAIN: value = value_or_default(config.servo_pos_d_gain, parameter_default<float>(ParameterId::SERVO_POS_D_GAIN)); return true;
@@ -171,10 +173,26 @@ bool read_parameter(const DriveConfig& data, ParameterId id, ParameterValue& val
     DriveConfig& data,
     ParameterId id,
     const ParameterValue& value,
-    bool apply_runtime
+    bool staged
 ) {
     auto& config = data.app;
     auto& base = data.base;
+    const bool apply_runtime = !staged && get_motor() != nullptr;
+    if (id == ParameterId::MAX_TEMP || id == ParameterId::RESTART_TEMP) {
+        const float temperature = value_or_default(std::get<float>(value), id == ParameterId::MAX_TEMP
+            ? parameter_default<float>(ParameterId::MAX_TEMP) : parameter_default<float>(ParameterId::RESTART_TEMP));
+        if (!std::isfinite(temperature) || temperature <= 0) return ParameterWriteResult::INVALID;
+        VBDriveConfig candidate = config;
+        if (id == ParameterId::MAX_TEMP) candidate.max_temp = temperature;
+        else candidate.restart_temp = temperature;
+        if (!staged && !candidate.temperature_limits_valid()) return ParameterWriteResult::INVALID;
+        config = candidate;
+        if (apply_runtime) {
+            config.apply_temperature_config();
+            get_app_manager().service_temperature();
+        }
+        return ParameterWriteResult::OK;
+    }
     if (id == ParameterId::KT) {
         const float torque_const = value_or_default(std::get<float>(value), parameter_default<float>(ParameterId::KT));
         if (!std::isfinite(torque_const) || torque_const <= 0) return ParameterWriteResult::INVALID;
@@ -369,4 +387,16 @@ void VBDriveConfig::apply_servo_config() const {
         PIDConfig{.kp = value_or_default(servo_vel_p_gain, parameter_default<float>(ParameterId::SERVO_VEL_P_GAIN)),
                   .ki = value_or_default(servo_vel_i_gain, parameter_default<float>(ParameterId::SERVO_VEL_I_GAIN))});
     motor->set_servo_input_config(servo_input_config());
+}
+
+bool VBDriveConfig::temperature_limits_valid() const {
+    const float maximum = value_or_default(max_temp, parameter_default<float>(ParameterId::MAX_TEMP));
+    const float restart = value_or_default(restart_temp, parameter_default<float>(ParameterId::RESTART_TEMP));
+    return std::isfinite(maximum) && std::isfinite(restart) && restart > 0 && restart < maximum;
+}
+
+void VBDriveConfig::apply_temperature_config() const {
+    if (auto motor = get_motor()) motor->set_temperature_limits(
+        value_or_default(max_temp, parameter_default<float>(ParameterId::MAX_TEMP)),
+        value_or_default(restart_temp, parameter_default<float>(ParameterId::RESTART_TEMP)));
 }

@@ -6,7 +6,7 @@
 
 ## Configuration and Control Registers (Serial and Cyphal)
 
-All 48 registers are shared. The following configuration registers are read/write
+All 50 registers are shared. The following configuration registers are read/write
 and persistent; runtime controls `is_on` and `bootloader` are marked separately.
 
 | Parameter | Description | Type | Default |
@@ -36,6 +36,8 @@ and persistent; runtime controls `is_on` and `bootloader` are marked separately.
 | `data_baud` | FDCAN data baud rate enum (see below) | Enum | `3` (8 MHz) |
 | `nominal_baud` | FDCAN nominal baud rate enum (see below) | Enum | `4` (1 MHz) |
 | `serial_baud` | Serial baud rate, applied after reboot | natural32 | `115200` |
+| `max_temp` | Stator trip temperature, K | Float | `363.15` |
+| `restart_temp` | Stator recovery temperature, K | Float | `333.15` |
 
 To clear a user-configured limit, write `NaN` to the corresponding register:
 `min_ang`, `max_ang`, `max_spd`, `max_i`, or `max_tq`. Each limit is
@@ -67,9 +69,12 @@ can only reduce the effective current limit. Both Servo saturation and final
 FOC current clipping also enforce `MAX_BOARD_CURRENT = 30 A`, independently of
 the configured rated/user limits.
 
-The application configuration uses type ID `0x44AAAC04` (122 bytes), following
-the 28-byte common block. There is no automatic migration from other application
-schemas; preserve and restore settings when updating firmware across schemas.
+The application configuration uses type ID `0x44AAAC05` (130 bytes), following
+the 28-byte common block. Incompatible application data resets to defaults;
+there is no migration or automatic restoration. Configure the drive anew and
+recalibrate. Calibration uses independent type `0x89ABCDF0`; incompatible stored
+calibration is rejected. Communication identity/rates in the common block and
+inductive sensor programming remain intact.
 
 | Runtime control | Type | Access | Persistent | Meaning |
 | --- | --- | --- | --- | --- |
@@ -215,6 +220,9 @@ All entries are non-persistent and readable without CONFIG. Writes are rejected.
 | `bus_current` | real32 | Estimated DC-link current, A |
 | `temp_mcu` | real32 | MCU temperature, K |
 | `temp_stator` | real32 | Stator temperature, K |
+| `is_fault` | bit | Reports false; DRV_FAULT integration remains deferred |
+| `encoder_shaft` | natural32 | Raw external encoder counts |
+| `encoder_rotor` | natural32 | Raw internal encoder counts |
 
 `bus_current` is computed as $I_{bus} \approx 3(V_d I_d + V_q I_q)/(2V_{bus})$,
 using filtered dq currents and the voltage vector after its magnitude limit. It is zero when the drive is disabled, during bootstrap charging or when bus voltage is zero.
@@ -224,9 +232,6 @@ Both temperature registers report kelvins: subtract 273.15 to get degrees Celsiu
 of STSPIN32G4, not the temperature of its package surface or ambient air. `temp_stator`
 uses the external THERM1 divider;
 its value is the motor sensor temperature.
-| `is_fault` | bit | Reports false; DRV_FAULT integration remains deferred |
-| `encoder_shaft` | natural32 | Raw external encoder counts |
-| `encoder_rotor` | natural32 | Raw internal encoder counts |
 
 Before motor initialization, unavailable measurements return a Serial error or an
 empty Cyphal value. GetInfo's software major/minor come from the same tag.
@@ -235,6 +240,45 @@ Its numeric VCS revision encodes `major << 32 | minor << 16 | patch`:
 with optional `v` prefix and suffix; the full spelling is retained in
 `firmware_rev`, while numeric fields encode only major/minor/patch. Major/minor
 must fit 8 bits and patch 16 bits. These versions do not describe uncommitted changes.
+
+### Temperature protection
+
+`max_temp` and `restart_temp` use kelvins, like `temp_mcu` and `temp_stator`.
+Defaults are 363.15 K (90 °C) and 333.15 K (60 °C). Resolved thresholds must be
+finite and satisfy `0 < restart_temp < max_temp`. NaN restores the individual
+default; it does not disable protection. Serial CONFIG permits staged edits in
+any order but SAVE/APPLY rejects an invalid final pair before changing runtime
+state or saving. Cyphal validates each resulting pair atomically. Successful
+Cyphal writes and Serial SAVE apply thresholds.
+
+The stator trips at `temp_stator >= max_temp` and remains inhibited until
+`temp_stator <= restart_temp`. The MCU operating junction range is
+233.15–403.15 K (−40…130 °C), inclusive. These fixed limits follow the STM32G431VBx3
+embedded in STSPIN32G4 ([STSPIN32G4 §5.3](https://www.st.com/resource/en/datasheet/stspin32g4.pdf#page=26),
+[STM32G431 Table 17](https://www.st.com/resource/en/datasheet/stm32g431kb.pdf#page=71)).
+Invalid/uninitialized/non-finite readings, NTC ADC endpoints and invalid MCU
+reference/calibration inputs also inhibit operation until valid recovery.
+
+Protection forces `is_on=0` and PWM MOE=0, clears old control/history/integrals and
+keeps the STSPIN logic supply and communications operating. A previously enabled
+drive automatically enables at a neutral target after recovery in RUNNING;
+movement requires a fresh command. Explicit `is_on=0` cancels this restoration.
+A deliberately OFF drive stays OFF. Rejected motion/enable requests are not queued.
+CONFIG can coexist with protection and defers automatic enable until RUNNING.
+Missing/incompatible calibration still requires calibration before operation.
+
+`VBDriveStatus : uint8_t` is independent of CommandState: `NOMINAL=0`,
+`COOLING_DOWN=1`. COOLING_DOWN covers any temperature or sensor-validity interlock.
+The scheduled Heartbeat reports this status in `vendor_specific_status_code`:
+
+| Condition | vendor_specific_status_code | health |
+| --- | --- | --- |
+| Any temperature/validity interlock active | 1 | CAUTION (2) |
+| No interlock, stator >= restart_temp | 0 | ADVISORY (1) |
+| No interlock, stator < restart_temp | 0 | NOMINAL (0) |
+
+Temperature conversion/evaluation runs in foreground once per millisecond,
+including OFF/CONFIG and without CAN, outside the 40 kHz control path. During calibration, a thermal abort stops PWM, returns `CALIBRATE ERROR: thermal protection`, restores communications and enters NOT_CALIBRATED without saving partial data or restarting calibration.
 
 ### **FDCAN Baud Rate Configuration**
 
@@ -296,7 +340,7 @@ through a delimiter and produce an error, never a partial motion command.
 | `INFO` | Except CALIBRATING | Repeat startup information with configured settings (including staged values in CONFIG) |
 | `HELP` | Except CALIBRATING | List Serial commands and syntax |
 | `EXIT` | CONFIG | Discard staged changes, including RESET, and restore previous state |
-| `SAVE` | CONFIG | Persist changes, apply Servo gains, exit CONFIG |
+| `SAVE` | CONFIG | Persist changes, apply Servo/temperature settings, exit CONFIG |
 | `RESET` | CONFIG | Stage fresh defaults; EXIT discards them |
 | `APPLY` | Except CALIBRATING | Save pending changes and reboot |
 | `CALIBRATE` | RUNNING, NOT_CALIBRATED | Run isolated blocking calibration |
@@ -325,7 +369,7 @@ frames pending at the calibration boundary are discarded.
 `CALIBRATE 10/10 DONE` are emitted after the ten movement stages;
 `CALIBRATE FINISH` follows successful EEPROM save and
 application of the result. Wait for FINISH before sending another command.
-Calibration cannot be cancelled. If the driver is off, CALIBRATE enables it
+Thermal protection can abort calibration; Serial commands cannot cancel it. If the driver is off, CALIBRATE enables it
 for the calibration motion and disables it again after completion.
 
 Logging is disabled when leaving RUNNING and does not restart automatically.
@@ -436,7 +480,7 @@ The controller also supports standard Cyphal services:
 
 The controller also publishes standard Cyphal messages:
 
-* **uavcan.node.Heartbeat** - default heartbeat message
+* **uavcan.node.Heartbeat** — Thermal health and independent VBDriveStatus as described above
 
 ---
 

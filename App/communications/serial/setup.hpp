@@ -32,9 +32,6 @@ void process_serial() {
     }
     if (!serial_deferred) return;
     serial_busy = true;
-    if (std::string_view(serial_line, serial_length) == "APPLY") {
-        if (auto motor = get_motor()) motor->stop();
-    }
     get_app_manager().process_command(std::string_view(serial_line, serial_length));
     reboot_to_bootloader_if_requested();
     serial_length = 0;

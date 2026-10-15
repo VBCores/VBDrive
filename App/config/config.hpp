@@ -7,6 +7,7 @@
 #include <optional>
 #include <cmath>
 #include <voltbro/config/config_manager.hpp>
+#include <voltbro/motors/bldc/vbdrive/temperature.hpp>
 
 struct ServoInputConfig;
 class EEPROM;
@@ -68,7 +69,9 @@ enum class ParameterId : uint8_t {
     DEVICE,
     RATED_MAX_TORQUE,
     RATED_MAX_CURRENT,
-    VELOCITY_PLANNING_TOLERANCE
+    VELOCITY_PLANNING_TOLERANCE,
+    MAX_TEMP,
+    RESTART_TEMP
 };
 
 using ParameterValue = std::variant<uint32_t, int32_t, float, bool, std::string_view>;
@@ -91,7 +94,7 @@ enum class ParameterWriteResult : uint8_t {
     UNAVAILABLE
 };
 
-inline constexpr std::array<ParameterDefinition, 48> PARAMETER_CATALOG{{
+inline constexpr std::array<ParameterDefinition, 50> PARAMETER_CATALOG{{
     {ParameterId::GEAR,          "gear",          ParameterType::NATURAL32, true,  true, ParameterValue{uint32_t{36}}},
     {ParameterId::MAX_I,         "max_i",         ParameterType::REAL32,    true,  true, ParameterValue{float{NAN}}},
     {ParameterId::MAX_SPD,       "max_spd",       ParameterType::REAL32,    true,  true, ParameterValue{float{NAN}}},
@@ -140,6 +143,8 @@ inline constexpr std::array<ParameterDefinition, 48> PARAMETER_CATALOG{{
     {ParameterId::RATED_MAX_TORQUE, "rated_max_torque", ParameterType::REAL32, true, true, ParameterValue{float{30.0f}}},
     {ParameterId::RATED_MAX_CURRENT, "rated_max_current", ParameterType::REAL32, true, true, ParameterValue{float{30.0f}}},
     {ParameterId::VELOCITY_PLANNING_TOLERANCE, "velocity_planning_tolerance", ParameterType::REAL32, true, true, ParameterValue{float{0.5f}}},
+    {ParameterId::MAX_TEMP, "max_temp", ParameterType::REAL32, true, true, ParameterValue{DEFAULT_MAX_STATOR_TEMPERATURE_K}},
+    {ParameterId::RESTART_TEMP, "restart_temp", ParameterType::REAL32, true, true, ParameterValue{DEFAULT_RESTART_STATOR_TEMPERATURE_K}},
 }};
 
 consteval bool parameter_catalog_is_valid() {
@@ -205,7 +210,7 @@ inline constexpr BaseConfigData BASE_CONFIG_DEFAULTS = [] {
     return config;
 }();
 
-inline constexpr uint32_t VBDRIVE_CONFIG_TYPE_ID = 0x44AAAC04;
+inline constexpr uint32_t VBDRIVE_CONFIG_TYPE_ID = 0x44AAAC05;
 
 struct __attribute__((packed)) VBDriveConfig {
     static constexpr uint32_t TYPE_ID = VBDRIVE_CONFIG_TYPE_ID;
@@ -241,7 +246,11 @@ struct __attribute__((packed)) VBDriveConfig {
     float rated_max_torque = NAN;
     float rated_max_current = NAN;
     float velocity_planning_tolerance = NAN;
+    float max_temp = NAN;
+    float restart_temp = NAN;
 
+    bool temperature_limits_valid() const;
+    void apply_temperature_config() const;
     bool are_required_params_set(const BaseConfigData& base) const;
     void apply_servo_config() const;
     ServoInputConfig servo_input_config() const;
@@ -260,8 +269,9 @@ static_assert(VB_CONFIG_ADDRESS >= 0 && VB_CONFIG_ADDRESS <= 32768U - sizeof(Dri
 
 const ParameterDefinition* find_parameter(std::string_view name);
 bool read_parameter(const DriveConfig& config, ParameterId id, ParameterValue& value);
+// Staged writes defer cross-parameter validation and runtime application until commit.
 ParameterWriteResult write_persistent_parameter(DriveConfig& config, ParameterId id,
-                                               const ParameterValue& value, bool apply_runtime);
+                                               const ParameterValue& value, bool staged);
 ParameterWriteResult write_runtime_parameter(ParameterId id, const ParameterValue& value);
 void record_invalid_command();
 inline bool bootloader_reboot_pending = false;

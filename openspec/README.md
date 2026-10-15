@@ -4,19 +4,19 @@ This directory contains the current VBDrive behavioral baseline. The firmware
 implementation is the source of truth when capturing existing behavior; README
 and baseline specs are maintained to describe it accurately. Proposed behavior
 changes live in `changes/` until they are implemented, verified and synchronized
-into `specs/`. The initial baseline captures existing firmware and does not
-represent an outstanding firmware implementation task.
+into `specs/`.
 
 ## Capabilities
 
 | Specification | Contract |
 | --- | --- |
 | [Control timing](specs/control-timing/spec.md) | 40 kHz control, 5 kHz references, 8 kHz integral, bounded RX/TX, State cadence and timing qualification |
-| [Register interface](specs/register-interface/spec.md) | All 48 registers, types/defaults/access, Serial/Cyphal formats, activation and persistence |
+| [Register interface](specs/register-interface/spec.md) | All 50 registers, types/defaults/access, Serial/Cyphal formats, activation and persistence |
 | [Control modes](specs/control-modes/spec.md) | Seven Servo modes, MIT, control laws, limits, command identity and rejection |
 | [Coordinates and units](specs/coordinates-and-units/spec.md) | Rotor/electrical/output/user frames, ang_dir, ang_off, gear, kt and telemetry units |
 | [Drive lifecycle](specs/drive-lifecycle/spec.md) | INIT/RUNNING/CONFIG/NOT_CALIBRATED/CALIBRATING, ON/OFF, STOP, calibration and bootloader |
 | [FOC control](specs/foc-control/spec.md) | Observer, current regulation, clipping, modulation, bus-current estimate and disabled sensing |
+| [Temperature protection](specs/temperature-protection/spec.md) | Sensor validity, stator hysteresis, MCU limits, neutral recovery and Heartbeat health/status |
 | [Trajectory generation](specs/trajectory-generation/spec.md) | FILTER/POLY/RAMP equations, initialization, continuous retargeting and configuration |
 
 Requirements deliberately focus on firmware behavior. They do not freeze every
@@ -69,14 +69,10 @@ All paths below are relative to the repository root. Test commands run as
 | Motion modes and coordinates | `Drivers/libvoltbro/voltbro/motors/bldc/{bldc.h,foc/foc.hpp,foc/foc.cpp,vbdrive/vbdrive.hpp}`, `Drivers/libvoltbro/voltbro/math/regulators/pid.hpp` | `servo_control`, `rated_limits`, `mit_control`, `kalman_filter` |
 | Lifecycle | `App/state_manager/state_manager.{h,cpp}`, `App/app.cpp`, `Drivers/libvoltbro/voltbro/motors/bldc/vbdrive/vbdrive.hpp` | `parameter_interfaces`, `servo_control`, `cyphal_arena` |
 | FOC and sensing | `Drivers/libvoltbro/voltbro/motors/bldc/{foc,vbdrive}/`, `Drivers/libvoltbro/voltbro/math/regulators/pid.hpp` | `kalman_filter`, `bus_current`, `rated_limits`, `pwm_foc_sync` |
+| Temperature protection | `App/state_manager/`, `App/communications/cyphal/setup.hpp`, `Drivers/libvoltbro/voltbro/motors/bldc/vbdrive/` | `temperature_conversion`, `thermal_protection`, `parameter_interfaces` |
 | Generators | `Drivers/libvoltbro/voltbro/motors/trajectories/`, `Drivers/libvoltbro/voltbro/motors/bldc/foc/foc.{hpp,cpp}` | `servo_input`, `servo_control` |
 
 These tests cover selected production paths with host substitutes where needed.
 The table is a navigation and regression guide, not a claim that every scenario
 has an automated or physical test. Nominal rates and divider ratios are distinct
 from measured control throughput, handler jitter and delivered State messages.
-
-Initial verification on 2026-10-15: all seven specs passed strict OpenSpec
-validation, and all thirteen named host checks above passed. No firmware build,
-flashing, motion or new hardware timing qualification was performed for this
-documentation baseline.

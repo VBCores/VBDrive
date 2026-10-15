@@ -35,7 +35,9 @@ template<class T> struct AbstractSubscription {
     virtual void handler(const T&, CanardRxTransfer*) = 0;
 };
 struct FOCTarget {float torque, angle, velocity, angle_kp, velocity_kp;};
+enum class VBDriveStatus { NOMINAL, COOLING_DOWN };
 struct Motor {
+    VBDriveStatus get_status()const{return VBDriveStatus::NOMINAL;}
     FOCTarget target{};
     float kp=17, ki=19;
     int targets=0, gains=0;

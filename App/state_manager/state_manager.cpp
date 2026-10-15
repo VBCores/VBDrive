@@ -21,10 +21,35 @@ ParameterWriteResult DriveStateController::set_motor_enabled(bool enabled) {
     if (!motor) return ParameterWriteResult::UNAVAILABLE;
     if (enabled && !is_app_running()) return ParameterWriteResult::INVALID;
     if (!enabled) {
-        if (configs.is_editing()) restore_motor_enable = false;
+        restore_motor_enable = false;
         motor->reset_servo_input();
+    } else {
+        if (!service_temperature()) return ParameterWriteResult::INVALID;
+        if (motor->get_status() != VBDriveStatus::NOMINAL) return ParameterWriteResult::INVALID;
     }
     return motor->set_state(enabled) == HAL_OK ? ParameterWriteResult::OK : ParameterWriteResult::INVALID;
+}
+
+[[gnu::optimize("Os")]] bool DriveStateController::service_temperature() {
+    auto motor = get_motor();
+    if (!motor) return true;
+    VBDRIVE_PROFILE_HANDLER(temperature_service_timing);
+    const bool was_on = motor->is_on();
+    motor->update_thermal_protection();
+    if (was_on && !motor->is_on()) restore_motor_enable = true;
+    if (restore_motor_enable && is_app_running() && motor->get_status() == VBDriveStatus::NOMINAL) {
+        if (motor->start() != HAL_OK) {
+            if (motor->get_status() == VBDriveStatus::NOMINAL) restore_motor_enable = false;
+            return false;
+        }
+        restore_motor_enable = false;
+    }
+    return true;
+}
+
+void DriveStateController::request_startup_enable() {
+    restore_motor_enable = is_app_running();
+    service_temperature();
 }
 
 void DriveStateController::set_state(CommandState state) {
@@ -69,7 +94,9 @@ void DriveStateController::process_command(std::string_view command, UARTRespons
             serial_send_message("CALIBRATE OK\r\n");
             const bool success = do_calibrate();
             serial_wait_for_uart();
-            responses.append(success ? "CALIBRATE FINISH\r\n" : "CALIBRATE ERROR: failed\r\n");
+            responses.append(success ? "CALIBRATE FINISH\r\n" :
+                get_motor() && get_motor()->get_status() == VBDriveStatus::COOLING_DOWN
+                ? "CALIBRATE ERROR: thermal protection\r\n" : "CALIBRATE ERROR: failed\r\n");
         }
         return;
     }
@@ -124,7 +151,7 @@ void DriveStateController::process_command(std::string_view command, UARTRespons
             return;
         }
         if (definition->is_persistent) {
-            if (serial_set_parameter(configs.get_config(), param, value, responses, false)) configs.mark_changed();
+            if (serial_set_parameter(configs.get_config(), param, value, responses, true)) configs.mark_changed();
         } else if (value != "0" && value != "1") {
             responses.append("%.*s ERROR: Invalid value\r\n", int(param.size()), param.data());
         } else if (write_runtime_parameter(definition->id, ParameterValue{value == "1"}) != ParameterWriteResult::OK) {
@@ -137,9 +164,8 @@ void DriveStateController::process_command(std::string_view command, UARTRespons
             state_before_config = app_state;
             configs.begin();
             set_state(CommandState::CONFIG);
-            restore_motor_enable = false;
             if (auto motor = get_motor()) {
-                restore_motor_enable = motor->is_on();
+                restore_motor_enable |= motor->is_on();
                 motor->stop();
             }
         }
@@ -149,16 +175,19 @@ void DriveStateController::process_command(std::string_view command, UARTRespons
     if (command == "EXIT" && configs.is_editing()) {
         configs.discard();
         set_state(state_before_config);
-        if (is_app_running() && restore_motor_enable) {
-            if (set_motor_enabled(true) != ParameterWriteResult::OK) {
-                responses.append("EXIT ERROR: driver enable failed; changes discarded\r\n");
-                return;
-            }
+        if (!service_temperature()) {
+            responses.append("EXIT ERROR: driver enable failed; changes discarded\r\n");
+            return;
         }
         responses.append("EXIT OK: changes discarded\r\n");
         return;
     }
     if (command == "APPLY") {
+        if (!configs.get_config().app.temperature_limits_valid()) {
+            responses.append("APPLY ERROR: Invalid temperature limits\r\n");
+            return;
+        }
+        if (auto motor = get_motor()) motor->stop();
         if (!configs.save()) Error_Handler();
         serial_wait_for_uart();
         char message[] = "APPLY OK\r\n";
@@ -172,14 +201,18 @@ void DriveStateController::process_command(std::string_view command, UARTRespons
             configs.reset();
             responses.append("RESET OK: defaults staged; run APPLY to activate\r\n");
         } else {
+            if (!configs.get_config().app.temperature_limits_valid()) {
+                responses.append("SAVE ERROR: Invalid temperature limits\r\n");
+                return;
+            }
             if (!configs.commit()) Error_Handler();
-            set_state(CommandState::RUNNING);
+            set_state(state_before_config == CommandState::NOT_CALIBRATED
+                ? CommandState::NOT_CALIBRATED : CommandState::RUNNING);
             configs.get_config().app.apply_servo_config();
-            if (restore_motor_enable) {
-                if (set_motor_enabled(true) != ParameterWriteResult::OK) {
-                    responses.append("SAVE ERROR: driver enable failed; config saved\r\n");
-                    return;
-                }
+            configs.get_config().app.apply_temperature_config();
+            if (!service_temperature()) {
+                responses.append("SAVE ERROR: driver enable failed; config saved\r\n");
+                return;
             }
             responses.append("SAVE OK: config saved; run APPLY to activate\r\n");
         }
@@ -191,13 +224,13 @@ void DriveStateController::process_command(std::string_view command, UARTRespons
 bool apply_mit_command(FOCTarget target) {
     if (!get_app_manager().is_app_running()) return false;
     auto motor = get_motor();
-    return motor && motor->set_foc_point(std::move(target));
+    return motor && motor->get_status() == VBDriveStatus::NOMINAL && motor->set_foc_point(std::move(target));
 }
 
 bool apply_servo_command(uint8_t type, float value, bool indexed, uint8_t index) {
     if (!get_app_manager().is_app_running()) return false;
     auto motor = get_motor();
-    if (!motor) return false;
+    if (!motor || motor->get_status() != VBDriveStatus::NOMINAL) return false;
     const bool accepted = motor->set_servo_command(type, value, indexed, index);
     VBDRIVE_PROFILE_RESULT(servo, accepted)
     return accepted;

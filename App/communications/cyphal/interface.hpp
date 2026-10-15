@@ -47,9 +47,6 @@ void in_loop_reporting(millis current_t) {
         state_msg.vel.radian_per_second = motor->get_velocity();
         state_msg._torq.newton_meter = motor->get_torque();
 
-        // Keep temperature measurements fresh for Serial/Cyphal registers.
-        motor_inverter.update_temperature();
-
         static CanardTransferID state_transfer_id = 0;
         get_interface()->send_msg(&state_msg, FOC_STATE_PORT, &state_transfer_id, 1000);
         VBDRIVE_PROFILE_COUNT(state_messages_queued)
@@ -157,7 +154,7 @@ static void handle_parameter_register(
         if (parsed) {
             auto& config = get_app_manager().get_committed_config();
             const auto write_result = definition.is_persistent
-                ? write_persistent_parameter(config, definition.id, requested, get_motor() != nullptr)
+                ? write_persistent_parameter(config, definition.id, requested, false)
                 : write_runtime_parameter(definition.id, requested);
             if (write_result == ParameterWriteResult::OK && definition.is_persistent) {
                 get_app_manager().mark_config_changed();

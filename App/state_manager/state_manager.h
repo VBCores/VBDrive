@@ -27,6 +27,8 @@ public:
     bool is_app_running() const;
     bool is_logging() const;
     ParameterWriteResult set_motor_enabled(bool enabled);
+    bool service_temperature();
+    void request_startup_enable();
     void mark_config_changed();
     void persist_pending_config();
     [[gnu::cold]] void process_command(std::string_view command);

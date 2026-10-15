@@ -70,13 +70,17 @@ int main() {
  assert(!m.get_config().are_required_params_set());
  assert(m.get_config().app.gear_ratio==0);
  assert(parameter_default<uint32_t>(ParameterId::GEAR)==36);
+ assert(VBDriveConfig::TYPE_ID==0x44AAAC05);
+ assert(sizeof(VBDriveConfig)==130 && sizeof(DriveConfig)==158);
+ assert(parameter_default<float>(ParameterId::MAX_TEMP)==363.15f);
+ assert(parameter_default<float>(ParameterId::RESTART_TEMP)==333.15f);
  assert(m.save() && e.writes==1);
  for(size_t i=sizeof(DriveConfig);i<e.bytes.size();++i)assert(e.bytes[i]==0xA5);
  auto& cfg=m.get_config();cfg.base.node_id=1;cfg.app.gear_ratio=36;
  strcpy(cfg.base.name,"axis-01");m.mark_changed();assert(m.save());
  const BaseConfigData saved_base=cfg.base;
  // An unknown application layout must retain communications and device identity.
- cfg.app.type_id=0xDEADBEEF;e.write(&cfg,0);
+ cfg.app.type_id=0x44AAAC04;e.write(&cfg,0);
  assert(m.load() && m.needs_save());
  assert(memcmp(&cfg.base,&saved_base,sizeof(saved_base))==0);
  assert(cfg.app.type_id==VBDriveConfig::TYPE_ID && cfg.app.gear_ratio==0);

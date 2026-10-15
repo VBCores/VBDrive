@@ -96,7 +96,8 @@ for name in ("TrajectoryState servo_initial_state(", "void reset_control()", "bo
 source += "};\n" + function(implementation, "float FOC::servo_torque()")
 source += r'''
 using HAL_StatusTypeDef = int;
-constexpr int HAL_OK=0;
+constexpr int HAL_OK=0, HAL_ERROR=1;
+enum class VBDriveStatus { NOMINAL, COOLING_DOWN };
 unsigned HAL_GetTick() { return 100; }
 // PWM channels remain enabled: the conditional HAL macro must NOT be used here.
 #define __HAL_TIM_MOE_DISABLE(timer) ((void)0)
@@ -104,6 +105,8 @@ unsigned HAL_GetTick() { return 100; }
 #define __HAL_TIM_MOE_ENABLE(timer) bridge_enabled=true
 struct VBDrive : FOC {
     bool _is_on=false, bridge_enabled=false;
+    VBDriveStatus thermal_status=VBDriveStatus::NOMINAL;
+    void update_thermal_protection() {}
     unsigned bootstrap_charge_deadline_ms=0, bootstrap_charge_time_ms=2;
     struct Gate {
         unsigned standby_requests=0;

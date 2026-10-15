@@ -3,7 +3,7 @@
 #include "app.h"
 #include "state_manager/state_manager.h"
 #include "profiling.hpp"
-#include <voltbro/motors/bldc/foc/foc.hpp>
+#include <voltbro/motors/bldc/vbdrive/vbdrive.hpp>
 #include <cyphal/cyphal.h>
 #include <cyphal/providers/G4CAN.h>
 #include <cyphal/allocators/o1/o1_allocator.h>
@@ -94,7 +94,6 @@ void configure_fdcan(FDCAN_HandleTypeDef* hfdcan) {
 using DiagnosticRecord = uavcan_diagnostic_Record_1_1;
 using HBeat = uavcan_node_Heartbeat_1_0;
 
-static uint8_t CYPHAL_HEALTH_STATUS = uavcan_node_Health_1_0_NOMINAL;
 static uint8_t CYPHAL_MODE = uavcan_node_Mode_1_0_INITIALIZATION;
 static std::shared_ptr<CyphalInterface> cyphal_interface;
 static bool _is_cyphal_on = false;
@@ -136,11 +135,20 @@ UtilityConfig utilities(micros_64, cyphal_error_handler);
 
 void heartbeat() {
     static CanardTransferID hbeat_transfer_id = 0;
+    const auto motor = get_motor();
+    const auto status = motor ? motor->get_status() : VBDriveStatus::NOMINAL;
+    const auto thermal_state = motor ? motor->get_thermal_health() : ThermalState::CAUTION;
+    uint8_t health = uavcan_node_Health_1_0_CAUTION;
+    switch (thermal_state) {
+        case ThermalState::NOMINAL: health = uavcan_node_Health_1_0_NOMINAL; break;
+        case ThermalState::ADVISORY: health = uavcan_node_Health_1_0_ADVISORY; break;
+        case ThermalState::CAUTION: health = uavcan_node_Health_1_0_CAUTION; break;
+    }
     HBeat heartbeat_msg = {
         .uptime = (uint32_t)std::floor(millis_32() / 1000.0f),
-        .health = {CYPHAL_HEALTH_STATUS},
+        .health = {health},
         .mode = {CYPHAL_MODE},
-        .vendor_specific_status_code = static_cast<uint8_t>(cyphal_interface->queue_size())
+        .vendor_specific_status_code = to_underlying(status)
     };
 
     if (_is_cyphal_on) {

@@ -27,6 +27,7 @@ STUB = r'''
 #include <string_view>
 #include <cstdint>
 #include <voltbro/utils.hpp>
+#include <voltbro/motors/bldc/vbdrive/temperature.hpp>
 #include <voltbro/motors/bldc/foc/servo_control.hpp>
 #define HAL_UART_MODULE_ENABLED
 #define HAL_OK 0
@@ -87,8 +88,10 @@ struct FOCTarget { float torque=0,angle=0,velocity=0,angle_kp=0,velocity_kp=0; }
 enum class SetPointType { POSITION, VELOCITY, TORQUE, VOLTAGE };
 struct PIDConfig { float kp=0, ki=0, kd=0; };
 struct VBInverter {
-    float get_mcu_temperature() const {return 30;}
-    float get_stator_temperature() const {return 25;}
+    float mcu=30, stator=25;
+    void update_temperature() {}
+    float get_mcu_temperature() const {return mcu;}
+    float get_stator_temperature() const {return stator;}
 };
 struct VBDrive {
     struct { float torque_const=1.0f; } drive_info;
@@ -112,9 +115,14 @@ struct VBDrive {
     void reset_control() {servo_reference_ticks=servo_integral_ticks=0;servo_reference_initialize=false;}
     // Production command/configuration methods are injected here below.
     __PRODUCTION_SERVO_METHODS__
+    float max_stator_temperature=DEFAULT_MAX_STATOR_TEMPERATURE_K;
+    float restart_stator_temperature=DEFAULT_RESTART_STATOR_TEMPERATURE_K;
+    bool stator_hot=false;
+    VBDriveStatus thermal_status=VBDriveStatus::COOLING_DOWN;
+    __PRODUCTION_THERMAL_METHODS__
     bool on=true;
     unsigned starts=0;int start_result=0;
-    int stop() {on=false;return 0;}
+    int stop() {on=false;reset_servo_input();point_type=SetPointType::VOLTAGE;target={};servo_value=0;return 0;}
     int start() {++starts;on=start_result==0;return start_result;}
     float get_angle() const {return 0;}
     float get_velocity() const {return 0;}
@@ -165,6 +173,12 @@ bldc_header=(ROOT/'Drivers/libvoltbro/voltbro/motors/bldc/bldc.h').read_text()
 STUB=STUB.replace('__PRODUCTION_KT_SETTER__', extract_function(bldc_header, 'void set_torque_const('))
 STUB=STUB.replace('__PRODUCTION_SERVO_METHODS__', methods).replace('#include <voltbro/utils.hpp>', '#include <voltbro/utils.hpp>\n#include <voltbro/profiling.hpp>')
 
+vbdrive_header=(ROOT/'Drivers/libvoltbro/voltbro/motors/bldc/vbdrive/vbdrive.hpp').read_text()
+thermal_methods='\n'.join(extract_function(vbdrive_header, sig) for sig in
+    ('VBDriveStatus get_status()', 'ThermalState get_thermal_health()',
+     'void update_thermal_protection()', 'void set_temperature_limits('))
+STUB=STUB.replace('__PRODUCTION_THERMAL_METHODS__', thermal_methods)
+
 TEST = r'''
 std::string command(std::string_view s) {
     uart_output.clear(); manager.process_command(s); return uart_output;
@@ -183,7 +197,7 @@ int main() {
         assert(uart_frames.size()==100);
         for (const auto& frame : uart_frames) assert(frame=="line\r\n");
     }
-    static_assert(sizeof(BaseConfigData)==28 && sizeof(VBDriveConfig)==122 && sizeof(DriveConfig)==150);
+    static_assert(sizeof(BaseConfigData)==28 && sizeof(VBDriveConfig)==130 && sizeof(DriveConfig)==158);
     static_assert(CONFIG_PLACEMENT==0 && CALIBRATION_PLACEMENT==0x100);
     auto& config = manager.get_config();
     for (const auto& definition : PARAMETER_CATALOG) {
@@ -195,6 +209,7 @@ int main() {
             assert(std::isnan(std::get<float>(actual)));
         } else assert(actual == *definition.default_value);
     }
+    manager.service_temperature();
     config.app.apply_servo_config();
     assert(device.position.kp==150 && device.position.ki==200 && device.position.kd==10);
     assert(device.velocity.kp==30 && device.velocity.ki==60);
@@ -267,7 +282,7 @@ int main() {
     assert(command("RESET").starts_with("RESET OK:"));
     assert(command("EXIT").starts_with("EXIT OK:")); assert(config.base.node_id==11);
     for (const auto& d:PARAMETER_CATALOG) {
-        if (!d.is_persistent) continue;
+        if (!d.is_persistent || d.id==ParameterId::MAX_TEMP || d.id==ParameterId::RESTART_TEMP) continue;
         ParameterValue before; assert(read_parameter(config,d.id,before));
         command("CONFIG");
         const auto input=d.id==ParameterId::SERIAL_BAUD ? "9600" : d.type==ParameterType::INTEGER32 ? "-1" : "1";
@@ -351,7 +366,7 @@ int main() {
     assert(std::isnan(kt_saved.app.torque_const));
     assert(resets==kt_resets && device.starts==kt_nan_starts && device.on==kt_on);
     for (const auto& d:PARAMETER_CATALOG) {
-        if (!d.is_persistent) continue;
+        if (!d.is_persistent || d.id==ParameterId::MAX_TEMP || d.id==ParameterId::RESTART_TEMP) continue;
         if (d.type==ParameterType::REAL32) fill_register_real32(input,1);
         else if (d.type==ParameterType::INTEGER32) fill_register_integer32(input,1);
         else if (d.type==ParameterType::STRING) fill_register_string(input,"axis-01");
@@ -391,9 +406,21 @@ int main() {
     assert(std::string_view(config.base.name)=="axis-01");
     fill_register_natural32(input,1); access("name",input);
     assert(std::string_view(config.base.name)=="axis-01");
-    assert(write_persistent_parameter(config,ParameterId::NAME,std::string_view("bad\nname"),false)==ParameterWriteResult::INVALID);
+    assert(write_persistent_parameter(config,ParameterId::NAME,std::string_view("bad\nname"),true)==ParameterWriteResult::INVALID);
     fill_register_integer32(input,0); access("is_on",input); assert(!device.on);
     motor=nullptr; fill_register_natural32(input,13); access("node_id",input); assert(config.base.node_id==13);
+    // Committed writes validate the complete pair even before a motor exists.
+    const auto original_thermal_config=config.app;
+    fill_register_real32(input,400);access("restart_temp",input);
+    assert(std::isnan(config.app.restart_temp));
+    fill_register_real32(input,420);access("max_temp",input);
+    fill_register_real32(input,400);access("restart_temp",input);
+    assert(config.app.max_temp==420 && config.app.restart_temp==400);
+    fill_register_real32(input,390);access("max_temp",input);
+    assert(config.app.max_temp==420 && config.app.restart_temp==400);
+    assert(device.max_stator_temperature==DEFAULT_MAX_STATOR_TEMPERATURE_K);
+    assert(device.restart_stator_temperature==DEFAULT_RESTART_STATOR_TEMPERATURE_K);
+    config.app=original_thermal_config;
     assert(command("STOP")=="STOP OK\r\n");
     assert(access("encoder_rotor",{})._tag_==REGISTER_EMPTY_TAG);
     assert(access("rated_max_torque",{})._tag_==REGISTER_REAL32_TAG);
@@ -450,11 +477,11 @@ int main() {
     for (size_t i=sizeof(DriveConfig);i<eeprom.memory.size();++i) assert(eeprom.memory[i]==0xA5);
     for (auto name : {"servo_pos_p_gain","servo_pos_i_gain","servo_pos_d_gain","servo_vel_p_gain","servo_vel_i_gain"}) {
         auto* d=find_parameter(name);
-        assert(write_persistent_parameter(config,d->id,-1.0f,false)==ParameterWriteResult::INVALID);
-        assert(write_persistent_parameter(config,d->id,NAN,false)==ParameterWriteResult::INVALID);
+        assert(write_persistent_parameter(config,d->id,-1.0f,true)==ParameterWriteResult::INVALID);
+        assert(write_persistent_parameter(config,d->id,NAN,true)==ParameterWriteResult::INVALID);
     }
-    assert(write_persistent_parameter(config,ParameterId::SERVO_CONTROL_VEL_LIMIT,-1.0f,false)==ParameterWriteResult::INVALID);
-    assert(write_persistent_parameter(config,ParameterId::SERVO_CONTROL_VEL_LIMIT,NAN,false)==ParameterWriteResult::OK);
+    assert(write_persistent_parameter(config,ParameterId::SERVO_CONTROL_VEL_LIMIT,-1.0f,true)==ParameterWriteResult::INVALID);
+    assert(write_persistent_parameter(config,ParameterId::SERVO_CONTROL_VEL_LIMIT,NAN,true)==ParameterWriteResult::OK);
     command("CONFIG"); command("servo_pos_p_gain:9");
     assert(device.position.kp==1);
     fill_register_real32(input,7); access("servo_pos_i_gain",input);
@@ -471,11 +498,11 @@ int main() {
     unsigned errors=access("cmd_errors",{}).natural32.value.elements[0];
     for (auto invalid : {"mit_cmd: 0 nan 0 0 0", "servo_cmd: 2 inf", "servo_cmd: 0 -inf", "servo_cmd: 0 bad"}) {
         assert(command(invalid).find("Invalid target")!=std::string::npos);
-        assert(device.target.velocity==.15f);
+        assert(device.target.velocity==0);
     }
     device.valid_target=false;
     assert(command("servo_cmd: 0 5").find("Invalid target")!=std::string::npos);
-    assert(device.target.velocity==.15f);
+    assert(device.target.velocity==0);
     assert(access("cmd_errors",{}).natural32.value.elements[0]==errors+5);
     device.valid_target=true; command("STOP");
     // Exact motion grammar, common dispatch, and transport-independent errors.
@@ -483,7 +510,7 @@ int main() {
         assert(command("servo_cmd: "+std::to_string(type)+" -0.25")=="servo_cmd OK\r\n");
         assert(device.servo_type==type && device.servo_value==-.25f);
     }
-    assert(write_persistent_parameter(config,ParameterId::SERVO_CONTROL_VEL_RAMP_RATE,2.0f,true)==ParameterWriteResult::OK);
+    assert(write_persistent_parameter(config,ParameterId::SERVO_CONTROL_VEL_RAMP_RATE,2.0f,false)==ParameterWriteResult::OK);
     assert(command("servo_cmd: 1 0.5 255")=="servo_cmd OK\r\n");
     assert(device.servo_command->type==ServoControlType::VELOCITY_RAMP && device.servo_command->index==255);
     std::get<RampTrajectory>(*device.servo_traj_generator).reference=.25f;
@@ -493,7 +520,7 @@ int main() {
     assert(command("servo_cmd: 1 0.6 255").find("Invalid target")!=std::string::npos);
     assert(access("cmd_errors",{}).natural32.value.elements[0]==errors_before_index+1);
     assert(device.servo_command->value==.5f);
-    assert(write_persistent_parameter(config,ParameterId::SERVO_CONTROL_VEL_RAMP_RATE,0.0f,true)==ParameterWriteResult::INVALID);
+    assert(write_persistent_parameter(config,ParameterId::SERVO_CONTROL_VEL_RAMP_RATE,0.0f,false)==ParameterWriteResult::INVALID);
     assert(config.app.servo_control_vel_ramp_rate==2.0f);
     assert(command("servo_cmd: 1 0.6 0")=="servo_cmd OK\r\n");
     assert(std::get<RampTrajectory>(*device.servo_traj_generator).reference==.25f);
@@ -681,7 +708,83 @@ int main() {
         assert(!device.on);device.start_result=0;
     }
     command("is_on:0");
-    puts("PASS: 48 shared registers, planning tolerance persistence/validation, Serial/Cyphal isolation, Servo apply and boot commands");
+
+    assert(PARAMETER_CATALOG.size()==50);
+    assert(command("max_temp:?").find("363.149")!=std::string::npos ||
+           command("max_temp:?").find("363.150")!=std::string::npos);
+    device.inverter.stator=59;
+    command("is_on:1");
+    for (float temperature : {59.f,60.f,89.f,90.f,80.f,60.f,59.f}) {
+        device.inverter.stator=temperature;
+        manager.service_temperature();
+        const bool cooling=temperature==90 || temperature==80;
+        assert(device.get_status()==(cooling?VBDriveStatus::COOLING_DOWN:VBDriveStatus::NOMINAL));
+        assert(device.get_thermal_health()==(cooling?ThermalState::CAUTION:temperature>=60?ThermalState::ADVISORY:ThermalState::NOMINAL));
+        assert(device.on==!cooling);
+        if(cooling) {
+            assert(!apply_servo_command(4,.5f));
+            assert(!apply_mit_command({.torque=.1f}));
+            assert(command("is_on:1").find("ERROR")!=std::string::npos);
+        }
+    }
+    // Both MCU bounds recover inclusively, independently of the stator latch.
+    for (auto pair : {std::pair{131.f,130.f},std::pair{-41.f,-40.f}}) {
+        device.inverter.mcu=pair.first;manager.service_temperature();assert(!device.on);
+        device.inverter.mcu=pair.second;manager.service_temperature();assert(device.on);
+    }
+    device.inverter.mcu=30;
+    for (float invalid : {NAN,INFINITY,-INFINITY}) {
+        device.inverter.stator=invalid;manager.service_temperature();assert(!device.on);
+        device.inverter.stator=75;manager.service_temperature();assert(device.on && device.get_thermal_health()==ThermalState::ADVISORY);
+    }
+    device.inverter.stator=90;manager.service_temperature();assert(!device.on);
+    device.inverter.stator=NAN;manager.service_temperature();
+    device.inverter.stator=75;manager.service_temperature();assert(!device.on);
+    command("is_on:0");device.inverter.stator=59;manager.service_temperature();assert(!device.on);
+    // No deferred enable is created by a rejected ON while deliberately OFF.
+    device.inverter.mcu=NAN;manager.service_temperature();command("is_on:1");
+    device.inverter.mcu=30;manager.service_temperature();assert(!device.on);
+    // CONFIG and cooling coexist; completion waits for RUNNING, never replays motion.
+    command("is_on:1");assert(apply_servo_command(3,.8f));
+    device.inverter.stator=90;manager.service_temperature();
+    assert(!device.servo_command && device.point_type==SetPointType::VOLTAGE);
+    command("CONFIG");device.inverter.stator=59;manager.service_temperature();assert(!device.on);
+    command("EXIT");assert(device.on && !device.servo_command);
+    command("CONFIG");
+    assert(command("restart_temp:400").find("OK")!=std::string::npos);
+    const int saved_writes=eeprom.writes, saved_resets=resets;
+    assert(command("SAVE").find("Invalid temperature")!=std::string::npos);
+    assert(command("APPLY").find("Invalid temperature")!=std::string::npos);
+    assert(manager.get_state()==CommandState::CONFIG && eeprom.writes==saved_writes && resets==saved_resets);
+    assert(command("max_temp:420").find("OK")!=std::string::npos);
+    assert(command("SAVE").find("SAVE OK")!=std::string::npos);
+    assert(device.max_stator_temperature==420 && device.restart_stator_temperature==400);
+    command("CONFIG");command("max_temp:nan");command("restart_temp:nan");command("SAVE");
+    assert(device.max_stator_temperature==DEFAULT_MAX_STATOR_TEMPERATURE_K &&
+           device.restart_stator_temperature==DEFAULT_RESTART_STATOR_TEMPERATURE_K);
+    for(float bad : {0.f,-1.f,INFINITY,-INFINITY}) {
+        fill_register_real32(input,bad);access("max_temp",input);
+        assert(device.max_stator_temperature==DEFAULT_MAX_STATOR_TEMPERATURE_K);
+    }
+    fill_register_real32(input,400);access("restart_temp",input);
+    assert(device.restart_stator_temperature==DEFAULT_RESTART_STATOR_TEMPERATURE_K);
+    // Live writes retain hysteresis and apply without a restart.
+    device.inverter.stator=90;manager.service_temperature();assert(!device.on);
+    device.inverter.stator=80;
+    fill_register_real32(input,383.15f);access("max_temp",input);assert(!device.on);
+    fill_register_real32(input,354.f);access("restart_temp",input);assert(device.on);
+    manager.persist_pending_config();DriveConfig thermal_disk;eeprom.read(&thermal_disk,0);
+    assert(thermal_disk.app.max_temp==383.15f && thermal_disk.app.restart_temp==354.f);
+    command("CONFIG");command("max_temp:nan");command("restart_temp:nan");command("SAVE");
+    device.inverter.stator=90;manager.service_temperature();command("CONFIG");
+    command("is_on:0");device.inverter.stator=59;manager.service_temperature();command("SAVE");assert(!device.on);
+    manager.set_state(CommandState::NOT_CALIBRATED);command("CONFIG");command("SAVE");
+    assert(manager.get_state()==CommandState::NOT_CALIBRATED && !device.on);
+    manager.set_state(CommandState::RUNNING);
+    device.inverter.stator=95;manager.request_startup_enable();assert(!device.on);
+    device.inverter.stator=59;manager.service_temperature();assert(device.on);
+    command("is_on:0");
+    puts("PASS: 50 shared registers, planning tolerance persistence/validation, Serial/Cyphal isolation, Servo apply and boot commands");
 }
 '''
 
