@@ -27,9 +27,9 @@ and persistent; runtime controls `is_on` and `bootloader` are marked separately.
 | `ki` | Current integral gain | Float | `1600.0` |
 | `kd` | Current derivative gain | Float | `0.0` |
 | `flt_a` | Main filter parameter A | Float | `0.0` |
-| `flt_g1` | Filter gain 1 | Float | `0.015700989410003974` |
-| `flt_g2` | Filter gain 2 | Float | `3.925227776360174` |
-| `flt_g3` | Filter gain 3 | Float | `387.54711795263574` |
+| `flt_g1` | Filter gain 1 | Float | `0.033554277` |
+| `flt_g2` | Filter gain 2 | Float | `18.974049687` |
+| `flt_g3` | Filter gain 3 | Float | `4444.260353864` |
 | `i_lpf` | Current low-pass filter coefficient | Float | `0.0925` |
 | `ang_enc` | Angle encoder type enum, 0 rotor, 1 shaft | Integer | `0` (rotor) |
 | `node_id` | Cyphal/CAN node ID | Integer | `0` (unset) |
@@ -441,6 +441,10 @@ The controller also publishes standard Cyphal messages:
 ---
 
 ## Build and verification
+
+Development follows the [OpenSpec baseline and workflow](openspec/README.md).
+The specs cover control timing, interfaces, modes, coordinates, lifecycle, FOC
+and reference generators; new behavioral changes are captured as OpenSpec deltas.
 
 Use `Release` for normal operation. `Debug` retains full symbols and MONITOR hooks,
 with application `-O3` and support libraries/bootloader `-Os`; optimized local variables may be unavailable in the debugger. Failed assertions disable PWM, retain `assertion_file`, `assertion_line` and `assertion_expression` for the debugger, and enter the fatal handler. Initialize submodules before configuring. DSDL C headers and C++ traits are generated into the build directory using the CMake module and templates supplied by libcxxcanard. The firmware includes the generated build-directory types.

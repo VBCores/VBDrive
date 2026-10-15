@@ -1,0 +1,35 @@
+schema: spec-driven
+
+context: |
+  VBDrive is STM32G431/STSPIN32G4 BLDC firmware, built with CMake and STM32 HAL.
+  App owns Serial/Cyphal interfaces, registers and command state. FOC, generators,
+  configuration storage and transport live in git submodules; identify affected repos.
+  Read openspec/README.md and the relevant main specs before proposing changes.
+  Follow AGENTS.md and tests/README.md. Heap is locked after initialization.
+  Use ordinary Release for physical acceptance. Hardware authorization and target
+  identity must follow the active user session and the existing hardware workflow.
+  Host tests do not establish MCU throughput or physical motor behavior.
+
+rules:
+  proposal:
+    - Identify affected capabilities, wire/register compatibility, persistence and affected submodules.
+    - Keep the scope concrete; use skip_specs only when no behavioral contract changes.
+  specs:
+    - Use testable SHALL requirements with WHEN/THEN scenarios; state units and coordinate frames.
+    - Distinguish nominal scheduling from measured throughput and state maintenance exceptions.
+    - Preserve full existing requirement content when modifying it; do not copy whole unrelated specs.
+  design:
+    - For control or communications changes explain timing, interrupt exclusion and state publication.
+    - For persistence changes describe application/bootloader compatibility and data placement.
+  tasks:
+    - Include relevant existing host checks; require physical checks when needed to substantiate timing or motor behavior.
+    - Keep firmware implementation, document updates and verification explicit; do not claim unperformed checks.
+
+operations:
+  apply:
+    guidance:
+      - Keep README and affected specs consistent with the resulting implementation.
+      - Preserve user changes and record validation evidence at the appropriate scope.
+  archive:
+    guidance:
+      - Verify the final implementation against the delta before merging it into main specs.
