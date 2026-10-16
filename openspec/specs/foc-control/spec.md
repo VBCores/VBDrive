@@ -44,13 +44,23 @@ Current-regulator integration SHALL be gated by the explicit ±Vbus bounds, with
 
 ### Requirement: Bus current estimate
 
-Bus current SHALL be estimated as 1.5(Vd Id + Vq Iq)/Vbus using filtered currents and the voltage vector after its magnitude limit. It SHALL be zero for nonpositive bus voltage, OFF and bootstrap charging. Signed negative electrical power SHALL yield a negative estimate. This SHALL remain an estimate rather than a physical DC-link current measurement or current-control feedback.
+Bus current SHALL be estimated in amperes as dA IA + dB IB + dC IC using measured phase currents and final applied duty ratios after SVM, integer PWM conversion and duty clipping. Duty ratios SHALL correspond to the sampled interval rather than the next control output. The signed estimate SHALL be low-pass filtered using i_lpf. It SHALL be zero for nonpositive bus voltage, OFF and bootstrap charging. Signed negative electrical power SHALL yield a negative estimate. This SHALL remain an estimate rather than a physical DC-link current measurement or current-control feedback.
 
 #### Scenario: Consumption and regeneration
 
-- **WHEN** Vbus=24 V, Vd=0, Vq=4 V and Iq=2 A
-- **THEN** estimated bus current is 0.5 A
-- **AND** reversing Iq with unchanged voltage yields -0.5 A.
+- **WHEN** Vbus=24 V, Vd=0, Vq=4 V and Iq=2 A in linear modulation at steady state
+- **THEN** estimated bus current is approximately 0.5 A, allowing for PWM quantization
+- **AND** reversing Iq with unchanged voltage yields approximately -0.5 A after the filter settles.
+
+#### Scenario: Saturation uses applied duty
+
+- **WHEN** Vbus=24 V, requested Vd=0, Vq=24 V, electrical angle=0 and Id=0, Iq=10 A produce final duty ratios 0.5, 0.88, 0
+- **THEN** the steady-state bus-current estimate is approximately 7.62 A rather than the 15 A implied by the requested voltage.
+
+#### Scenario: Next command does not alter sampled power
+
+- **WHEN** a current sample is processed while preparing a different PWM output
+- **THEN** the estimate uses the final duty ratios that applied during that sample, and the new PWM output contributes only to later samples.
 
 ### Requirement: Sensing during disabled operation
 

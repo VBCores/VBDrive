@@ -8,7 +8,7 @@ required. They do not establish physical motor behavior or MCU timing.
 | --- | --- |
 | `python3 tests/temperature_conversion.py` | Factory temperature conversion, invalid ADC endpoints/reference/calibration and uninitialized data. |
 | `python3 tests/thermal_protection.py` | Production bridge gate, all calibration cancellation boundaries and Heartbeat fields with hardware doubles. |
-| `python3 tests/bus_current.py` | Dq power estimate, consumption/regeneration sign, zero bus and OFF/bootstrap. |
+| `python3 tests/bus_current.py` | Applied PWM power estimate, saturation, sampled-interval alignment, signed filtering, consumption/regeneration, zero bus and OFF/bootstrap. |
 | `python3 tests/servo_input.py` | Standalone generators and abstract lifecycle: filter, ramp, trapezoidal/triangular profiles, reversal, overspeed, completion, invalid inputs and retargeting. |
 | `python3 tests/servo_control.py` | Production FOC command handling and PID, DIRECT/MIT, optional generator, indices, limits, ang_dir, 1:8/1:5 scheduling, interrupt-safe publication and POLY time horizon. |
 | `python3 tests/rated_limits.py` | Production BLDC rating priority, effective current/torque limits, larger stored user limits, target validation and stall entry/exit. |

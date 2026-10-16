@@ -224,8 +224,13 @@ All entries are non-persistent and readable without CONFIG. Writes are rejected.
 | `encoder_shaft` | natural32 | Raw external encoder counts |
 | `encoder_rotor` | natural32 | Raw internal encoder counts |
 
-`bus_current` is computed as $I_{bus} \approx 3(V_d I_d + V_q I_q)/(2V_{bus})$,
-using filtered dq currents and the voltage vector after its magnitude limit. It is zero when the drive is disabled, during bootstrap charging or when bus voltage is zero.
+`bus_current` is estimated as $I_{bus} \approx d_A I_A + d_B I_B + d_C I_C$,
+where phase currents are in amperes and duty ratios use the final PWM compare
+values after SVM and hardware duty limits. The duty ratios belong to the sampled
+interval, before the next control output is written. The signed estimate is
+low-pass filtered using `i_lpf`; negative values indicate regeneration.
+It is zero when the drive is disabled, during bootstrap charging or when bus
+voltage is nonpositive. This is an estimate, not a physical supply-current measurement.
 
 Both temperature registers report kelvins: subtract 273.15 to get degrees Celsius.
 `temp_mcu` is the temperature of the embedded STM32G431 die in the central part
