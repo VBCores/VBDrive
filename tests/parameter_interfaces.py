@@ -211,8 +211,8 @@ int main() {
     }
     manager.service_temperature();
     config.app.apply_servo_config();
-    assert(device.position.kp==150 && device.position.ki==200 && device.position.kd==10);
-    assert(device.velocity.kp==30 && device.velocity.ki==60);
+    assert(device.position.kp==10 && device.position.ki==0 && device.position.kd==.3f);
+    assert(device.velocity.kp==.6f && device.velocity.ki==0);
     config.base.node_id=11; config.app.gear_ratio=36; config.base.was_configured=true;
     {
         char buffer[512];
@@ -467,11 +467,11 @@ int main() {
     assert(std::isnan(config.app.servo_pos_p_gain) && std::isnan(config.app.servo_pos_i_gain) && std::isnan(config.app.servo_pos_d_gain));
     assert(std::isnan(config.app.servo_vel_p_gain) && std::isnan(config.app.servo_vel_i_gain) && std::isnan(config.app.servo_control_vel_limit));
     assert(command("servo_control_vel_limit:?").find("0.000000")!=std::string::npos);
-    assert(command("servo_pos_p_gain:?").find("150.000000")!=std::string::npos);
-    assert(command("servo_pos_i_gain:?").find("200.000000")!=std::string::npos);
-    assert(command("servo_pos_d_gain:?").find("10.000000")!=std::string::npos);
-    assert(command("servo_vel_p_gain:?").find("30.000000")!=std::string::npos);
-    assert(command("servo_vel_i_gain:?").find("60.000000")!=std::string::npos);
+    assert(command("servo_pos_p_gain:?").find("10.000000")!=std::string::npos);
+    assert(command("servo_pos_i_gain:?").find("0.000000")!=std::string::npos);
+    assert(command("servo_pos_d_gain:?").find("0.300000")!=std::string::npos);
+    assert(command("servo_vel_p_gain:?").find("0.600000")!=std::string::npos);
+    assert(command("servo_vel_i_gain:?").find("0.000000")!=std::string::npos);
     command("EXIT");
     assert(config.app.servo_pos_p_gain==1 && config.app.servo_control_vel_limit==5);
     for (size_t i=sizeof(DriveConfig);i<eeprom.memory.size();++i) assert(eeprom.memory[i]==0xA5);

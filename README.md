@@ -94,11 +94,11 @@ Servo parameters are shared Serial/Cyphal read/write persistent registers:
 
 | Name | Type | Default |
 | --- | --- | --- |
-| `servo_pos_p_gain` | real32 | 150 |
-| `servo_pos_i_gain` | real32 | 200 |
-| `servo_pos_d_gain` | real32 | 10 |
-| `servo_vel_p_gain` | real32 | 30 |
-| `servo_vel_i_gain` | real32 | 60 |
+| `servo_pos_p_gain` | real32 | 10 |
+| `servo_pos_i_gain` | real32 | 0 |
+| `servo_pos_d_gain` | real32 | 0.3 |
+| `servo_vel_p_gain` | real32 | 0.6 |
+| `servo_vel_i_gain` | real32 | 0 |
 | `servo_control_input_bandwith` | real32 | 0 |
 | `servo_control_vel_limit` | real32 | 0 |
 | `servo_control_accel_limit` | real32 | 0 |
@@ -387,9 +387,9 @@ All Serial exchanges use the same shared register catalog.
 
 ```text
 CONFIG
-servo_pos_p_gain:150
-servo_pos_i_gain:200
-servo_pos_d_gain:10
+servo_pos_p_gain:10
+servo_pos_i_gain:0
+servo_pos_d_gain:0.3
 SAVE
 is_on:1
 log_on

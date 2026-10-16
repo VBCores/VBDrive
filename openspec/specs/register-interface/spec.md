@@ -163,11 +163,11 @@ required stored gear field; gear and node identity must be explicitly configured
 | `is_fault` | bit | RO | `—` |
 | `encoder_shaft` | natural32 | RO | `—` |
 | `encoder_rotor` | natural32 | RO | `—` |
-| `servo_pos_p_gain` | real32 | RW/P | `150.0` |
-| `servo_pos_i_gain` | real32 | RW/P | `200.0` |
-| `servo_pos_d_gain` | real32 | RW/P | `10.0` |
-| `servo_vel_p_gain` | real32 | RW/P | `30.0` |
-| `servo_vel_i_gain` | real32 | RW/P | `60.0` |
+| `servo_pos_p_gain` | real32 | RW/P | `10.0` |
+| `servo_pos_i_gain` | real32 | RW/P | `0.0` |
+| `servo_pos_d_gain` | real32 | RW/P | `0.3` |
+| `servo_vel_p_gain` | real32 | RW/P | `0.6` |
+| `servo_vel_i_gain` | real32 | RW/P | `0.0` |
 | `servo_control_input_bandwith` | real32 | RW/P | `0.0` |
 | `servo_control_vel_limit` | real32 | RW/P | `0.0` |
 | `servo_control_accel_limit` | real32 | RW/P | `0.0` |
